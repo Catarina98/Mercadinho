@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Search, Plus, Minus, Trash2, ArrowRight, AlertCircle, Package } from 'lucide-react';
+import { ShoppingBag, Search, Plus, Minus, Trash2, ArrowRight, AlertCircle, Package, AlertTriangle } from 'lucide-react';
 import Scanner from './Scanner';
 import QuantityKeypadModal from './QuantityKeypadModal';
 import CheckoutModal from './CheckoutModal';
@@ -7,8 +7,8 @@ import ReceiptModal from './ReceiptModal';
 import { audioService } from '../utils/audio';
 
 export default function PosView({
-  products,
-  categories,
+  products = [],
+  categories = [],
   activeMarket,
   currencySymbol = '€',
   onSaveSale,
@@ -23,10 +23,37 @@ export default function PosView({
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
   const [notFoundCode, setNotFoundCode] = useState(null);
+  const [stockWarning, setStockWarning] = useState(null);
   const [mobileTab, setMobileTab] = useState('catalog'); // 'catalog' | 'cart' on mobile
+
+  // Available products for POS (only items with stock > 0)
+  const availableProducts = products.filter(p => typeof p.stock === 'number' ? p.stock > 0 : true);
 
   // Add product to cart (by object)
   const addToCart = (product, qty = 1) => {
+    const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+
+    if (maxStock <= 0) {
+      audioService.playErrorBuzz();
+      setStockWarning(`"${product.name}" is out of stock (0 items available).`);
+      setTimeout(() => setStockWarning(null), 4500);
+      return;
+    }
+
+    const existingItem = cart.find(item => item.id === product.id || (item.code && item.code === product.code));
+    const currentQtyInCart = existingItem ? existingItem.quantity : 0;
+
+    if (currentQtyInCart + qty > maxStock) {
+      audioService.playErrorBuzz();
+      setStockWarning(`Cannot add more "${product.name}". Only ${maxStock} in stock (${currentQtyInCart} already in cart).`);
+      setTimeout(() => setStockWarning(null), 4500);
+
+      if (currentQtyInCart < maxStock) {
+        updateQuantity(product.id, maxStock);
+      }
+      return;
+    }
+
     audioService.playScanBeep();
     setCart((prev) => {
       const existingIndex = prev.findIndex(item => item.id === product.id || (item.code && item.code === product.code));
@@ -47,7 +74,9 @@ export default function PosView({
             price: Number(product.price),
             category: product.category || 'General',
             color: product.color || '#6366f1',
-            quantity: qty
+            quantity: qty,
+            stock: maxStock,
+            unit: product.unit || 'un'
           }
         ];
       }
@@ -61,6 +90,14 @@ export default function PosView({
     const product = products.find(p => p.code && p.code.toString().trim().toLowerCase() === clean);
 
     if (product) {
+      const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+      if (maxStock <= 0) {
+        audioService.playErrorBuzz();
+        setStockWarning(`"${product.name}" is out of stock (0 items available).`);
+        setTimeout(() => setStockWarning(null), 4500);
+        return;
+      }
+
       addToCart(product, 1);
       setNotFoundCode(null);
     } else {
@@ -76,7 +113,18 @@ export default function PosView({
       removeFromCart(itemId);
       return;
     }
-    setCart(prev => prev.map(item => item.id === itemId ? { ...item, quantity: newQty } : item));
+
+    const origProduct = products.find(p => p.id === itemId);
+    const maxStock = origProduct && typeof origProduct.stock === 'number' ? origProduct.stock : 999;
+
+    if (newQty > maxStock) {
+      audioService.playErrorBuzz();
+      setStockWarning(`Cannot increase quantity for "${origProduct?.name || 'Item'}". Only ${maxStock} in stock.`);
+      setTimeout(() => setStockWarning(null), 4500);
+      newQty = maxStock;
+    }
+
+    setCart(prev => prev.map(item => item.id === itemId ? { ...item, quantity: Math.min(newQty, maxStock) } : item));
   };
 
   // Remove single item from cart
@@ -99,8 +147,8 @@ export default function PosView({
     setMobileTab('catalog');
   };
 
-  // Filtered products list
-  const filteredProducts = products.filter(p => {
+  // Filtered products list (only with stock > 0)
+  const filteredProducts = availableProducts.filter(p => {
     const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q ||
@@ -144,6 +192,26 @@ export default function PosView({
             setIsScannerActive={setIsScannerActive}
           />
 
+          {/* Stock Warning Banner */}
+          {stockWarning && (
+            <div style={{
+              background: '#fef3c7',
+              border: '1px solid #f59e0b',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.85rem 1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              animation: 'fadeIn 0.2s ease-out',
+              color: '#92400e',
+              fontSize: '0.85rem',
+              fontWeight: 600
+            }}>
+              <AlertTriangle size={18} color="#d97706" style={{ flexShrink: 0 }} />
+              <div>{stockWarning}</div>
+            </div>
+          )}
+
           {/* Code Not Found Banner with quick Add button */}
           {notFoundCode && (
             <div style={{
@@ -157,7 +225,7 @@ export default function PosView({
               gap: '0.75rem',
               animation: 'fadeIn 0.2s ease-out'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#dc2626' }}>
                 <AlertCircle size={18} />
                 <div style={{ fontSize: '0.85rem' }}>
                   Barcode <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>"{notFoundCode}"</span> not registered in catalog.
@@ -205,34 +273,43 @@ export default function PosView({
               </button>
             </div>
 
-            {/* Category Filter Pills */}
+            {/* Category Filter Pills (In-Stock Counts) */}
             <div className="category-pills-container">
               <button
                 className={`category-pill ${selectedCategory === 'all' ? 'active' : ''}`}
                 onClick={() => setSelectedCategory('all')}
               >
-                All ({products.length})
+                All ({availableProducts.length})
               </button>
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  className={`category-pill ${selectedCategory === cat.name ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(cat.name)}
-                >
-                  {cat.name}
-                </button>
-              ))}
+              {categories.map((cat) => {
+                const count = availableProducts.filter(p => p.category === cat.name).length;
+                return (
+                  <button
+                    key={cat.id}
+                    className={`category-pill ${selectedCategory === cat.name ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory(cat.name)}
+                  >
+                    {cat.name} ({count})
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Product Quick Grid */}
+            {/* Product Quick Grid (Available Stock Only) */}
             <div className="products-grid">
               {filteredProducts.map((p) => {
                 const inCartItem = cart.find(c => c.id === p.id);
+                const maxStock = typeof p.stock === 'number' ? p.stock : 999;
+                const isMaxInCart = inCartItem && inCartItem.quantity >= maxStock;
+
                 return (
                   <div
                     key={p.id}
                     className="product-card-pos"
-                    style={{ '--item-color': p.color || '#6366f1' }}
+                    style={{
+                      '--item-color': p.color || '#6366f1',
+                      opacity: isMaxInCart ? 0.75 : 1
+                    }}
                     onClick={() => addToCart(p, 1)}
                   >
                     <div className="product-card-title">{p.name}</div>
@@ -242,14 +319,14 @@ export default function PosView({
                         position: 'absolute',
                         top: '6px',
                         right: '6px',
-                        background: 'var(--primary)',
+                        background: isMaxInCart ? '#f59e0b' : 'var(--primary)',
                         color: 'white',
                         fontSize: '0.7rem',
                         fontWeight: 700,
                         padding: '0.1rem 0.4rem',
                         borderRadius: 'var(--radius-full)'
                       }}>
-                        x{inCartItem.quantity}
+                        x{inCartItem.quantity} {isMaxInCart ? '(Max)' : ''}
                       </span>
                     )}
 
@@ -269,14 +346,16 @@ export default function PosView({
 
               {filteredProducts.length === 0 && (
                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                  No products found matching "{searchQuery}".
+                  {availableProducts.length === 0
+                    ? 'All items currently in catalog are out of stock (0 stock).'
+                    : `No available products found matching "${searchQuery}".`}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Right Column: POS Cart & Checkout (Always visible on Desktop, togglable on Mobile) */}
+        {/* Right Column: POS Cart & Checkout */}
         <div className={`pos-card cart-panel ${mobileTab === 'catalog' ? 'mobile-hidden' : ''}`}>
           <div className="cart-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -284,7 +363,7 @@ export default function PosView({
                 width: '34px',
                 height: '34px',
                 borderRadius: '10px',
-                background: 'rgba(16, 185, 129, 0.15)',
+                background: 'rgba(5, 150, 105, 0.12)',
                 color: 'var(--primary)',
                 display: 'flex',
                 alignItems: 'center',
@@ -307,7 +386,7 @@ export default function PosView({
                 onClick={clearCart}
                 title="Clear Cart"
               >
-                <Trash2 size={14} color="#f87171" />
+                <Trash2 size={14} color="#dc2626" />
               </button>
             )}
           </div>
@@ -315,61 +394,77 @@ export default function PosView({
           {/* Cart Item Rows */}
           {cart.length > 0 ? (
             <div className="cart-items-list">
-              {cart.map((item) => (
-                <div key={item.id} className="cart-item-row">
-                  <div className="cart-item-info">
-                    <div className="cart-item-name">{item.name}</div>
-                    <div className="cart-item-unit-price" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span>{item.price.toFixed(2)} {currencySymbol}</span>
-                      {item.code && (
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                          • {item.code}
-                        </span>
-                      )}
+              {cart.map((item) => {
+                const origProduct = products.find(p => p.id === item.id || (p.code && p.code === item.code));
+                const maxStock = origProduct && typeof origProduct.stock === 'number' ? origProduct.stock : (item.stock || 999);
+                const isAtMax = item.quantity >= maxStock;
+
+                return (
+                  <div key={item.id} className="cart-item-row">
+                    <div className="cart-item-info">
+                      <div className="cart-item-name">{item.name}</div>
+                      <div className="cart-item-unit-price" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span>{item.price.toFixed(2)} {currencySymbol}</span>
+                        {item.code && (
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            • {item.code}
+                          </span>
+                        )}
+                        {maxStock < 999 && (
+                          <span style={{ fontSize: '0.7rem', color: isAtMax ? '#d97706' : 'var(--text-muted)', fontWeight: isAtMax ? 700 : 400 }}>
+                            • Max: {maxStock}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Quantity Stepper */}
-                  <div className="qty-stepper">
-                    <button
-                      className="qty-btn"
-                      onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                      title="Decrease"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <div
-                      className="qty-display"
-                      onClick={() => setSelectedCartItemForQty(item)}
-                      title="Tap to type custom quantity"
-                    >
-                      {item.quantity}
+                    {/* Quantity Stepper */}
+                    <div className="qty-stepper">
+                      <button
+                        className="qty-btn"
+                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                        title="Decrease"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <div
+                        className="qty-display"
+                        onClick={() => setSelectedCartItemForQty({ ...item, maxStock })}
+                        title="Tap to type custom quantity"
+                      >
+                        {item.quantity}
+                      </div>
+                      <button
+                        className="qty-btn"
+                        disabled={isAtMax}
+                        style={{
+                          opacity: isAtMax ? 0.35 : 1,
+                          cursor: isAtMax ? 'not-allowed' : 'pointer'
+                        }}
+                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                        title={isAtMax ? `Maximum available stock reached (${maxStock})` : 'Increase'}
+                      >
+                        <Plus size={14} />
+                      </button>
                     </div>
+
+                    {/* Line Total */}
+                    <div className="cart-item-total">
+                      {(item.price * item.quantity).toFixed(2)} {currencySymbol}
+                    </div>
+
+                    {/* Delete Item Button */}
                     <button
-                      className="qty-btn"
-                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                      title="Increase"
+                      className="btn btn-secondary btn-icon"
+                      style={{ width: '30px', height: '30px', minHeight: '30px', opacity: 0.6 }}
+                      onClick={() => removeFromCart(item.id)}
+                      title="Remove item"
                     >
-                      <Plus size={14} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
-
-                  {/* Line Total */}
-                  <div className="cart-item-total">
-                    {(item.price * item.quantity).toFixed(2)} {currencySymbol}
-                  </div>
-
-                  {/* Delete Item Button */}
-                  <button
-                    className="btn btn-secondary btn-icon"
-                    style={{ width: '30px', height: '30px', minHeight: '30px', opacity: 0.6 }}
-                    onClick={() => removeFromCart(item.id)}
-                    title="Remove item"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="cart-empty-state">
@@ -429,7 +524,7 @@ export default function PosView({
         </div>
       </div>
 
-      {/* Floating Bottom Quick Cart Bar on Mobile (only when on catalog tab and cart has items) */}
+      {/* Floating Bottom Quick Cart Bar on Mobile */}
       {cart.length > 0 && mobileTab === 'catalog' && (
         <div
           className="mobile-floating-cart-bar visible"
@@ -451,33 +546,28 @@ export default function PosView({
               {totalUnits}
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Current Cart</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
-                {subtotal.toFixed(2)} {currencySymbol}
+              <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>View Current Cart</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                {cart.length} unique {cart.length === 1 ? 'item' : 'items'}
               </div>
             </div>
           </div>
 
-          <button
-            className="btn btn-primary"
-            style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', minHeight: '36px' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsCheckoutOpen(true);
-            }}
-          >
-            <span>Checkout</span>
-            <ArrowRight size={15} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '1rem', color: 'var(--primary)' }}>
+              {subtotal.toFixed(2)} {currencySymbol}
+            </span>
+            <ArrowRight size={16} color="var(--primary)" />
+          </div>
         </div>
       )}
 
-      {/* Quantity Numpad Modal */}
+      {/* Quantity Keypad Modal */}
       {selectedCartItemForQty && (
         <QuantityKeypadModal
           isOpen={Boolean(selectedCartItemForQty)}
-          onClose={() => setSelectedCartItemForQty(null)}
           item={selectedCartItemForQty}
+          onClose={() => setSelectedCartItemForQty(null)}
           onUpdateQuantity={updateQuantity}
         />
       )}
@@ -497,11 +587,10 @@ export default function PosView({
       {/* Receipt Modal */}
       {lastCompletedSale && (
         <ReceiptModal
+          sale={lastCompletedSale}
           isOpen={Boolean(lastCompletedSale)}
           onClose={() => setLastCompletedSale(null)}
-          sale={lastCompletedSale}
           currencySymbol={currencySymbol}
-          onNewSale={() => setLastCompletedSale(null)}
         />
       )}
     </div>

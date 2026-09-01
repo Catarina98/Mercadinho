@@ -1,16 +1,27 @@
 import React, { useState } from 'react';
-import { X, Check, Plus, Minus } from 'lucide-react';
+import { X, Check, Plus, Minus, AlertTriangle } from 'lucide-react';
 
 export default function QuantityKeypadModal({ isOpen, onClose, item, onUpdateQuantity }) {
   if (!isOpen || !item) return null;
 
-  const [qty, setQty] = useState(String(item.quantity || 1));
+  const maxStock = typeof item.maxStock === 'number' ? item.maxStock : (typeof item.stock === 'number' ? item.stock : 999);
+  const [qty, setQty] = useState(String(Math.min(maxStock, item.quantity || 1)));
 
   const handleNumpad = (digit) => {
+    let nextValStr = '';
     if (qty === '0' || qty === '') {
-      setQty(String(digit));
+      nextValStr = String(digit);
     } else if (qty.length < 4) {
-      setQty(qty + digit);
+      nextValStr = qty + digit;
+    } else {
+      return;
+    }
+
+    const numericVal = parseInt(nextValStr, 10) || 0;
+    if (numericVal > maxStock) {
+      setQty(String(maxStock));
+    } else {
+      setQty(nextValStr);
     }
   };
 
@@ -28,14 +39,9 @@ export default function QuantityKeypadModal({ isOpen, onClose, item, onUpdateQua
 
   const handleSave = (e) => {
     if (e) e.preventDefault();
-    const finalQty = Math.max(1, parseInt(qty, 10) || 1);
+    const finalQty = Math.min(maxStock, Math.max(1, parseInt(qty, 10) || 1));
     onUpdateQuantity(item.id, finalQty);
     onClose();
-  };
-
-  const addPreset = (amount) => {
-    const current = parseInt(qty, 10) || 1;
-    setQty(String(Math.max(1, current + amount)));
   };
 
   return (
@@ -60,7 +66,7 @@ export default function QuantityKeypadModal({ isOpen, onClose, item, onUpdateQua
           borderRadius: 'var(--radius-lg)',
           padding: '1.25rem',
           textAlign: 'center',
-          marginBottom: '1rem'
+          marginBottom: '0.75rem'
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '2.5rem', fontWeight: 800, color: 'var(--primary)' }}>
             {qty}
@@ -68,21 +74,36 @@ export default function QuantityKeypadModal({ isOpen, onClose, item, onUpdateQua
           <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Total: €{(Number(item.price) * (parseInt(qty, 10) || 1)).toFixed(2)}
           </div>
+          {maxStock < 999 && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem', fontWeight: 600 }}>
+              Available Stock: {maxStock} {item.unit || 'un'}
+            </div>
+          )}
         </div>
 
-        {/* Quick Presets */}
+        {/* Quick Presets (Only show presets <= maxStock) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-          {[1, 5, 10, 20].map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '0.5rem', fontSize: '0.85rem', fontWeight: 700 }}
-              onClick={() => setQty(String(preset))}
-            >
-              ={preset}
-            </button>
-          ))}
+          {[1, 2, 5, 10].map((preset) => {
+            const isOver = preset > maxStock;
+            return (
+              <button
+                key={preset}
+                type="button"
+                className="btn btn-secondary"
+                disabled={isOver}
+                style={{
+                  padding: '0.5rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  opacity: isOver ? 0.35 : 1,
+                  cursor: isOver ? 'not-allowed' : 'pointer'
+                }}
+                onClick={() => setQty(String(preset))}
+              >
+                ={preset}
+              </button>
+            );
+          })}
         </div>
 
         {/* Numpad */}
