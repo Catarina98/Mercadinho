@@ -26,8 +26,8 @@ export default function CatalogView({
   const [formCode, setFormCode] = useState('');
   const [formPrice, setFormPrice] = useState('');
   const [formCategory, setFormCategory] = useState(categories[0]?.name || 'General');
-  const [formStock, setFormStock] = useState('50');
-  const [formUnit, setFormUnit] = useState('pc');
+  const [formStock, setFormStock] = useState('1');
+  const [formUnit, setFormUnit] = useState('un');
   const [formColor, setFormColor] = useState('#6366f1');
 
   const openAddModal = (initialData = {}) => {
@@ -36,8 +36,8 @@ export default function CatalogView({
     setFormCode(initialData.code || generateRandomBarcode());
     setFormPrice(initialData.price ? String(initialData.price) : '5.00');
     setFormCategory(initialData.category || categories[0]?.name || 'General');
-    setFormStock(initialData.stock ? String(initialData.stock) : '50');
-    setFormUnit(initialData.unit || 'pc');
+    setFormStock(initialData.stock ? String(initialData.stock) : '1');
+    setFormUnit(initialData.unit || 'un');
     setFormColor(initialData.color || '#6366f1');
     setIsProductModalOpen(true);
   };
@@ -48,8 +48,8 @@ export default function CatalogView({
     setFormCode(product.code || '');
     setFormPrice(String(product.price || ''));
     setFormCategory(product.category || categories[0]?.name || 'General');
-    setFormStock(String(product.stock !== undefined ? product.stock : 50));
-    setFormUnit(product.unit || 'pc');
+    setFormStock(String(product.stock !== undefined ? product.stock : 1));
+    setFormUnit(product.unit || 'un');
     setFormColor(product.color || '#6366f1');
     setIsProductModalOpen(true);
   };
@@ -65,7 +65,7 @@ export default function CatalogView({
       price: Math.max(0, parseFloat(formPrice) || 0),
       category: formCategory,
       stock: parseInt(formStock, 10) || 0,
-      unit: formUnit.trim() || 'pc',
+      unit: formUnit.trim() || 'un',
       color: formColor
     };
 
@@ -431,7 +431,7 @@ export default function CatalogView({
                   <input
                     type="text"
                     className="input-styled"
-                    placeholder="pc, pack, kg, jar..."
+                    placeholder="un, pack, kg, jar..."
                     value={formUnit}
                     onChange={(e) => setFormUnit(e.target.value)}
                   />

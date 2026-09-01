@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     category TEXT,
     stock INTEGER DEFAULT 0,
-    unit TEXT DEFAULT 'pc',
+    unit TEXT DEFAULT 'un',
     color TEXT DEFAULT '#6366f1',
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

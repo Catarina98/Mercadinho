@@ -82,7 +82,7 @@ export function exportProductsToCSV(products) {
     (p.price || 0).toFixed(2),
     `"${(p.category || '').replace(/"/g, '""')}"`,
     p.stock || 0,
-    `"${p.unit || 'pc'}"`
+    `"${p.unit || 'un'}"`
   ]);
 
   const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
