@@ -16,12 +16,15 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
 
   const html5QrCodeRef = useRef(null);
   const lastScanTimestampRef = useRef(0);
+  const isMountedRef = useRef(true);
   const readerElementId = 'pos-camera-reader';
 
   // Initialize camera list
   useEffect(() => {
+    isMountedRef.current = true;
     Html5Qrcode.getCameras()
       .then((devices) => {
+        if (!isMountedRef.current) return;
         if (devices && devices.length > 0) {
           setCameras(devices);
           // Prefer back/rear camera on mobile
@@ -36,14 +39,43 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
       .catch((err) => {
         console.warn('Could not enumerate cameras:', err);
       });
+
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
+
+  // Stop scanner helper
+  const stopScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+        await html5QrCodeRef.current.clear();
+      } catch (e) {
+        console.warn('Error stopping scanner:', e);
+      }
+    }
+    if (isMountedRef.current) {
+      setScannerStarted(false);
+      setTorchOn(false);
+    }
+  };
 
   // Start / Stop Scanner Effect
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
 
     async function startScanner() {
       if (!isScannerActive) return;
+
+      // Small delay to ensure the DOM element exists
+      await new Promise(r => setTimeout(r, 60));
+      if (cancelled || !isMountedRef.current) return;
+
+      const container = document.getElementById(readerElementId);
+      if (!container) return;
 
       try {
         setCameraError(null);
@@ -68,8 +100,8 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
             return {
-              width: Math.floor(minEdge * 0.8),
-              height: Math.floor(minEdge * 0.55)
+              width: Math.floor(minEdge * 0.82),
+              height: Math.floor(minEdge * 0.58)
             };
           },
           aspectRatio: 1.6
@@ -80,7 +112,7 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
         await html5QrCodeRef.current.start(
           cameraIdOrConfig,
           config,
-          (decodedText, decodedResult) => {
+          (decodedText) => {
             const now = Date.now();
             // Debounce: prevent duplicate trigger within 1.2s for same code
             if (decodedText === lastScanTimestampRef.current.code && (now - lastScanTimestampRef.current.time) < 1200) {
@@ -88,6 +120,8 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
             }
 
             lastScanTimestampRef.current = { code: decodedText, time: now };
+            if (!isMountedRef.current) return;
+
             setLastScannedCode(decodedText);
             
             // Audio & Haptic feedback
@@ -95,24 +129,26 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
 
             // Visual feedback banner
             setScanFeedback({ success: true, text: decodedText });
-            setTimeout(() => setScanFeedback(null), 2500);
+            setTimeout(() => {
+              if (isMountedRef.current) setScanFeedback(null);
+            }, 2500);
 
             if (onScanSuccess) {
               onScanSuccess(decodedText);
             }
           },
-          (errorMessage) => {
+          () => {
             // Frame parse non-match is normal during scanning, ignore
           }
         );
 
-        if (isMounted) {
+        if (!cancelled && isMountedRef.current) {
           setScannerStarted(true);
           checkTorchCapability();
         }
       } catch (err) {
         console.error('Failed to start camera scanner:', err);
-        if (isMounted) {
+        if (!cancelled && isMountedRef.current) {
           setScannerStarted(false);
           setCameraError(err.message || 'Camera permission denied or camera unavailable');
         }
@@ -126,22 +162,10 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
     }
 
     return () => {
-      isMounted = false;
+      cancelled = true;
       stopScanner();
     };
   }, [isScannerActive, activeCameraId]);
-
-  const stopScanner = async () => {
-    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-      try {
-        await html5QrCodeRef.current.stop();
-      } catch (e) {
-        console.warn('Error stopping scanner:', e);
-      }
-    }
-    setScannerStarted(false);
-    setTorchOn(false);
-  };
 
   // Check if camera supports flashlight/torch
   const checkTorchCapability = () => {
@@ -194,7 +218,9 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
     audioService.playScanBeep();
     setLastScannedCode(manualCode.trim());
     setScanFeedback({ success: true, text: manualCode.trim() });
-    setTimeout(() => setScanFeedback(null), 2500);
+    setTimeout(() => {
+      if (isMountedRef.current) setScanFeedback(null);
+    }, 2500);
 
     if (onScanSuccess) {
       onScanSuccess(manualCode.trim());
@@ -210,7 +236,7 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
             width: '26px',
             height: '26px',
             borderRadius: '6px',
-            background: isScannerActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+            background: isScannerActive ? 'rgba(5, 150, 105, 0.15)' : '#f1f5f9',
             color: isScannerActive ? 'var(--primary)' : 'var(--text-muted)',
             display: 'flex',
             alignItems: 'center',
@@ -244,64 +270,72 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
       {/* Scanner Box Viewport */}
       {isScannerActive ? (
         <div className="scanner-box" style={{ width: '100%' }}>
-          <div id={readerElementId} className="scanner-viewport">
+          <div className="scanner-viewport">
+            {/* PURE DOM CONTAINER for Html5Qrcode - NO REACT CHILDREN EVER */}
+            <div id={readerElementId} style={{ width: '100%', height: '100%', minHeight: '180px' }} />
+
+            {/* React Loading Overlay (Sibling to Html5Qrcode container) */}
             {!scannerStarted && !cameraError && (
-              <div style={{ color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem' }}>
+              <div className="scanner-loading-overlay">
                 <RefreshCw size={22} className="spin-animation" />
-                <span style={{ fontSize: '0.8rem' }}>Starting camera...</span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Starting camera...</span>
               </div>
             )}
 
+            {/* React Error Overlay (Sibling to Html5Qrcode container) */}
             {cameraError && (
-              <div style={{ padding: '1.25rem 1rem', textAlign: 'center', color: '#f87171' }}>
-                <AlertCircle size={28} style={{ margin: '0 auto 0.4rem' }} />
-                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Camera Unavailable</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              <div className="scanner-error-overlay">
+                <AlertCircle size={28} color="#ef4444" style={{ margin: '0 auto 0.4rem' }} />
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#dc2626' }}>Camera Unavailable</div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem', maxWidth: '280px' }}>
                   {cameraError}
                 </div>
                 <button
                   className="btn btn-secondary"
                   style={{ marginTop: '0.6rem', fontSize: '0.75rem', minHeight: '30px' }}
-                  onClick={() => setIsScannerActive(true)}
+                  onClick={() => {
+                    setCameraError(null);
+                    setIsScannerActive(true);
+                  }}
                 >
-                  Retry
+                  Retry Camera
                 </button>
+              </div>
+            )}
+
+            {/* Scanner Reticle & Laser Overlay */}
+            {scannerStarted && (
+              <div className="scanner-overlay">
+                <div className="scanner-reticle">
+                  <div className="scanner-laser" />
+                </div>
               </div>
             )}
           </div>
 
-          {/* Scanner Reticle & Laser */}
-          {scannerStarted && (
-            <div className="scanner-overlay">
-              <div className="scanner-reticle">
-                <div className="scanner-laser" />
-              </div>
-            </div>
-          )}
-
           {/* Scanner Controls Bar */}
           {scannerStarted && (
             <div className="scanner-controls-bar">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: 'var(--primary)' }}>
-                <span className="market-pill-dot" /> Active
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: '#34d399', fontWeight: 700 }}>
+                <span className="market-pill-dot" /> Scanner Active
               </div>
 
               <div style={{ display: 'flex', gap: '0.35rem' }}>
                 {torchSupported && (
                   <button
                     className={`btn btn-secondary btn-icon ${torchOn ? 'active' : ''}`}
-                    style={{ width: '32px', height: '32px', minHeight: '32px' }}
+                    style={{ width: '32px', height: '32px', minHeight: '32px', background: '#1e293b', border: '1px solid #334155', color: '#ffffff' }}
                     onClick={toggleTorch}
                     title="Toggle Flashlight"
                   >
-                    <Flashlight size={14} color={torchOn ? '#f59e0b' : 'inherit'} />
+                    <Flashlight size={14} color={torchOn ? '#f59e0b' : '#ffffff'} />
                   </button>
                 )}
 
                 {cameras.length > 1 && (
                   <button
                     className="btn btn-secondary btn-icon"
-                    style={{ width: '32px', height: '32px', minHeight: '32px' }}
+                    style={{ width: '32px', height: '32px', minHeight: '32px', background: '#1e293b', border: '1px solid #334155', color: '#ffffff' }}
                     onClick={switchCamera}
                     title="Switch Camera"
                   >
@@ -317,9 +351,9 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
           onClick={() => setIsScannerActive(true)}
           style={{
             background: 'var(--bg-input)',
-            border: '1px dashed var(--border-subtle)',
+            border: '1px dashed #cbd5e1',
             borderRadius: 'var(--radius-md)',
-            padding: '1rem',
+            padding: '1.25rem 1rem',
             textAlign: 'center',
             cursor: 'pointer',
             transition: 'var(--transition)',
@@ -327,10 +361,10 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
             boxSizing: 'border-box'
           }}
         >
-          <Camera size={24} color="var(--primary)" style={{ margin: '0 auto 0.35rem' }} />
-          <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Camera scanner paused</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-            Tap to open camera or type barcode below
+          <Camera size={26} color="var(--primary)" style={{ margin: '0 auto 0.35rem' }} />
+          <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>Camera scanner paused</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+            Tap here to open camera or type barcode below
           </div>
         </div>
       )}
@@ -342,15 +376,15 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
           top: '3.5rem',
           left: '50%',
           transform: 'translateX(-50%)',
-          background: 'rgba(16, 185, 129, 0.95)',
+          background: 'var(--primary)',
           color: 'white',
-          padding: '0.35rem 0.85rem',
+          padding: '0.4rem 0.95rem',
           borderRadius: 'var(--radius-full)',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
           display: 'flex',
           alignItems: 'center',
           gap: '0.4rem',
-          fontSize: '0.78rem',
+          fontSize: '0.8rem',
           fontWeight: 700,
           zIndex: 10,
           animation: 'fadeIn 0.2s ease-out',

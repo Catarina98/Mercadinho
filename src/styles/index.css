@@ -526,14 +526,41 @@ h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
-#reader {
+.scanner-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(5, 7, 10, 0.88);
+  color: #f8fafc;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.scanner-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  background: rgba(5, 7, 10, 0.95);
+  z-index: 6;
+}
+
+#pos-camera-reader {
   width: 100% !important;
   max-width: 100% !important;
   border: none !important;
   box-sizing: border-box !important;
 }
 
-#reader video {
+#pos-camera-reader video {
   border-radius: var(--radius-md);
   object-fit: cover !important;
   width: 100% !important;
