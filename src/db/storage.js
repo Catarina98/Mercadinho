@@ -299,17 +299,33 @@ class PosStorage {
   }
 
   async getCategories() {
-    return await this.getAll('categories');
+    const cats = await this.getAll('categories');
+    return cats.sort((a, b) => (a.order !== undefined ? a.order : 999) - (b.order !== undefined ? b.order : 999));
   }
 
   async saveCategory(category) {
     if (!category.id) {
       category.id = `cat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
+    if (category.order === undefined) {
+      const existing = await this.getAll('categories');
+      category.order = existing.length;
+    }
     await this.put('categories', category);
     await this.ensureSupabase();
     await supabaseService.syncCategory(category);
     return category;
+  }
+
+  async saveAllCategories(categoriesList) {
+    await this.clear('categories');
+    const ordered = categoriesList.map((c, idx) => ({ ...c, order: idx }));
+    for (const c of ordered) {
+      await this.put('categories', c);
+    }
+    await this.ensureSupabase();
+    await supabaseService.pushAllLocalData({ categories: ordered });
+    return ordered;
   }
 
   async deleteCategory(id) {

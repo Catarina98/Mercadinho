@@ -123,6 +123,11 @@ export default function App() {
     setCategories(updated);
   };
 
+  const handleReorderCategories = async (reorderedList) => {
+    const updated = await db.saveAllCategories(reorderedList);
+    setCategories(updated);
+  };
+
   const handleDeleteCategory = async (catId) => {
     await db.deleteCategory(catId);
     const updated = await db.getCategories();
@@ -281,6 +286,7 @@ export default function App() {
             onSaveProduct={handleSaveProduct}
             onDeleteProduct={handleDeleteProduct}
             onSaveCategory={handleSaveCategory}
+            onReorderCategories={handleReorderCategories}
             onDeleteCategory={handleDeleteCategory}
             onResetDemoData={handleResetDemoData}
             editingProductInitial={editingProductInitial}

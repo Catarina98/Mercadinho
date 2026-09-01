@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
-import { Package, Plus, Search, Edit2, Trash2, Printer, Download, Upload, Barcode, Sparkles, Tag, Layers, RefreshCw, X, Check, FolderPlus, Palette } from 'lucide-react';
+import {
+  Package, Plus, Search, Edit2, Trash2, Printer, Download, Upload,
+  Barcode, Sparkles, Tag, Layers, RefreshCw, X, Check, FolderPlus,
+  Palette, ChevronUp, ChevronDown, ArrowUpDown, ArrowDownAZ, ArrowUpAZ, BarChart2
+} from 'lucide-react';
 import { formatCurrency, exportProductsToCSV } from '../utils/exportUtils';
 import LabelPrinterModal from './LabelPrinterModal';
 
@@ -21,6 +25,7 @@ export default function CatalogView({
   onSaveProduct,
   onDeleteProduct,
   onSaveCategory,
+  onReorderCategories,
   onDeleteCategory,
   onResetDemoData,
   editingProductInitial = null,
@@ -104,7 +109,8 @@ export default function CatalogView({
 
     await onSaveCategory({
       name: newCatName.trim(),
-      color: newCatColor
+      color: newCatColor,
+      order: categories.length
     });
 
     setNewCatName('');
@@ -116,7 +122,8 @@ export default function CatalogView({
 
     await onSaveCategory({
       name: catName,
-      color: PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]
+      color: PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)],
+      order: categories.length
     });
 
     setFormCategory(catName);
@@ -137,7 +144,8 @@ export default function CatalogView({
     await onSaveCategory({
       id: catId,
       name: editCatName.trim(),
-      color: editCatColor
+      color: editCatColor,
+      order: oldCat?.order !== undefined ? oldCat.order : 0
     });
 
     // Optionally update products that used the old category name
@@ -160,6 +168,35 @@ export default function CatalogView({
 
     if (confirm(confirmMsg)) {
       await onDeleteCategory(cat.id);
+    }
+  };
+
+  const handleMoveCategory = async (index, direction) => {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= categories.length) return;
+    const copy = [...categories];
+    const [moved] = copy.splice(index, 1);
+    copy.splice(newIndex, 0, moved);
+    if (onReorderCategories) {
+      await onReorderCategories(copy);
+    }
+  };
+
+  const handleSortCategories = async (type) => {
+    let sorted = [...categories];
+    if (type === 'az') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    } else if (type === 'za') {
+      sorted.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: 'base' }));
+    } else if (type === 'count') {
+      sorted.sort((a, b) => {
+        const countA = products.filter(p => p.category === a.name).length;
+        const countB = products.filter(p => p.category === b.name).length;
+        return countB - countA;
+      });
+    }
+    if (onReorderCategories) {
+      await onReorderCategories(sorted);
     }
   };
 
@@ -202,7 +239,7 @@ export default function CatalogView({
           <button
             className="btn btn-secondary"
             onClick={() => setIsCategoryModalOpen(true)}
-            title="Add, rename or delete product categories"
+            title="Add, rename, sort or delete product categories"
           >
             <Tag size={16} color="var(--primary)" />
             <span>Manage Categories ({categories.length})</span>
@@ -441,7 +478,7 @@ export default function CatalogView({
       {/* ======================= MANAGE CATEGORIES MODAL ======================= */}
       {isCategoryModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsCategoryModalOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '580px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '620px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -449,7 +486,7 @@ export default function CatalogView({
                   <span>Manage Product Categories ({categories.length})</span>
                 </h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                  Add new categories, edit names and colors, or remove unused ones
+                  Create, edit, reorder, or sort your categories
                 </p>
               </div>
               <button className="btn btn-secondary btn-icon" onClick={() => setIsCategoryModalOpen(false)}>
@@ -517,7 +554,55 @@ export default function CatalogView({
               </div>
             </form>
 
-            {/* Existing Categories List */}
+            {/* Sorting Quick-Bar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.5rem',
+              marginBottom: '0.65rem',
+              flexWrap: 'wrap'
+            }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <ArrowUpDown size={14} />
+                <span>Sort Categories:</span>
+              </span>
+
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem', minHeight: '30px' }}
+                  onClick={() => handleSortCategories('az')}
+                  title="Sort Alphabetically A to Z"
+                >
+                  <ArrowDownAZ size={13} />
+                  <span>A → Z</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem', minHeight: '30px' }}
+                  onClick={() => handleSortCategories('za')}
+                  title="Sort Alphabetically Z to A"
+                >
+                  <ArrowUpAZ size={13} />
+                  <span>Z → A</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem', minHeight: '30px' }}
+                  onClick={() => handleSortCategories('count')}
+                  title="Sort by Number of Products"
+                >
+                  <BarChart2 size={13} />
+                  <span>Most Items</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Existing Categories List with Move Up / Move Down controls */}
             <div style={{
               maxHeight: '340px',
               overflowY: 'auto',
@@ -525,7 +610,7 @@ export default function CatalogView({
               borderRadius: 'var(--radius-md)',
               background: 'var(--bg-surface)'
             }}>
-              {categories.map((cat) => {
+              {categories.map((cat, index) => {
                 const count = products.filter(p => p.category === cat.name).length;
                 const isEditing = editingCategoryId === cat.id;
 
@@ -594,11 +679,33 @@ export default function CatalogView({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '0.65rem 0.85rem',
+                      padding: '0.55rem 0.85rem',
                       borderBottom: '1px solid var(--border-subtle)',
                       gap: '0.5rem'
                     }}
                   >
+                    {/* Position Reorder Steppers */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                      <button
+                        className="btn btn-secondary btn-icon"
+                        style={{ width: '26px', height: '26px', minHeight: '26px', padding: 0 }}
+                        disabled={index === 0}
+                        onClick={() => handleMoveCategory(index, -1)}
+                        title="Move category up"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-icon"
+                        style={{ width: '26px', height: '26px', minHeight: '26px', padding: 0 }}
+                        disabled={index === categories.length - 1}
+                        onClick={() => handleMoveCategory(index, 1)}
+                        title="Move category down"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0, flex: 1 }}>
                       <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color || 'var(--primary)', flexShrink: 0 }} />
                       <span style={{ fontWeight: 600, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
