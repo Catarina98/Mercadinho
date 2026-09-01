@@ -173,11 +173,20 @@ class SupabaseService {
     }
   }
 
-  async deleteProduct(id) {
+  async deleteProduct(id, code = null) {
     if (!this.client) return;
     try {
-      await this.client.from('products').delete().eq('id', id);
-    } catch (e) {}
+      if (id) {
+        const res = await this.client.from('products').delete().eq('id', id);
+        if (res.error) console.warn('Supabase deleteProduct by id error:', res.error);
+      }
+      if (code) {
+        const resCode = await this.client.from('products').delete().eq('code', code);
+        if (resCode.error) console.warn('Supabase deleteProduct by code error:', resCode.error);
+      }
+    } catch (e) {
+      console.warn('Supabase deleteProduct exception:', e);
+    }
   }
 
   async syncMarket(market) {
@@ -195,7 +204,8 @@ class SupabaseService {
   async deleteMarket(id) {
     if (!this.client) return;
     try {
-      await this.client.from('markets').delete().eq('id', id);
+      const res = await this.client.from('markets').delete().eq('id', id);
+      if (res.error) console.warn('Supabase deleteMarket error:', res.error);
     } catch (e) {}
   }
 
@@ -208,13 +218,16 @@ class SupabaseService {
         color: category.color,
         icon: category.icon
       });
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Supabase syncCategory error:', e);
+    }
   }
 
   async deleteCategory(id) {
     if (!this.client) return;
     try {
-      await this.client.from('categories').delete().eq('id', id);
+      const res = await this.client.from('categories').delete().eq('id', id);
+      if (res.error) console.warn('Supabase deleteCategory error:', res.error);
     } catch (e) {}
   }
 
@@ -243,13 +256,41 @@ class SupabaseService {
   async deleteSale(id) {
     if (!this.client) return;
     try {
-      await this.client.from('sales').delete().eq('id', id);
+      const res = await this.client.from('sales').delete().eq('id', id);
+      if (res.error) console.warn('Supabase deleteSale error:', res.error);
     } catch (e) {}
   }
 
-  async pushAllLocalData(localData) {
+  async pushAllLocalData(localData, { overwriteAll = false } = {}) {
     if (!this.client) return false;
     try {
+      // If overwriteAll is requested, delete remote items that do not exist in local
+      if (overwriteAll) {
+        const remote = await this.fetchRemoteData();
+        if (remote) {
+          const localProdIds = new Set((localData.products || []).map(p => p.id));
+          for (const p of (remote.products || [])) {
+            if (!localProdIds.has(p.id)) {
+              await this.client.from('products').delete().eq('id', p.id);
+            }
+          }
+
+          const localCatIds = new Set((localData.categories || []).map(c => c.id));
+          for (const c of (remote.categories || [])) {
+            if (!localCatIds.has(c.id)) {
+              await this.client.from('categories').delete().eq('id', c.id);
+            }
+          }
+
+          const localMktIds = new Set((localData.markets || []).map(m => m.id));
+          for (const m of (remote.markets || [])) {
+            if (!localMktIds.has(m.id)) {
+              await this.client.from('markets').delete().eq('id', m.id);
+            }
+          }
+        }
+      }
+
       if (localData.products?.length) {
         await this.client.from('products').upsert(localData.products);
       }

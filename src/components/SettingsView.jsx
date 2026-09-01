@@ -50,7 +50,7 @@ export default function SettingsView({
     if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) return;
 
     setSyncStatus({ type: 'loading', message: 'Connecting and synchronizing data with Supabase...' });
-    
+
     // Save settings first
     await onSaveSettings({
       ...settings,
@@ -511,19 +511,6 @@ export default function SettingsView({
               accept=".json"
               style={{ display: 'none' }}
             />
-
-            <button
-              className="btn btn-danger"
-              onClick={async () => {
-                if (confirm('Reset to initial sample catalog and sales demonstration data? Your custom changes will be replaced with demo items.')) {
-                  await onResetDemoData();
-                  alert('Reset to demo data completed!');
-                }
-              }}
-            >
-              <RefreshCcw size={16} />
-              <span>Reset to Demo Data</span>
-            </button>
           </div>
         </div>
       </div>

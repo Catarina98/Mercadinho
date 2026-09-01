@@ -264,17 +264,37 @@ class PosStorage {
     return products.find(p => p.code && p.code.toString().trim().toLowerCase() === cleanCode) || null;
   }
 
+  async ensureSupabase() {
+    if (supabaseService.client) return supabaseService;
+    try {
+      const settings = await this.getSettings();
+      if (settings.supabaseUrl && settings.supabaseAnonKey) {
+        supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
+      }
+    } catch (e) {
+      console.warn('ensureSupabase error:', e);
+    }
+    return supabaseService;
+  }
+
   async saveProduct(product) {
     if (!product.id) {
       product.id = `prod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
     await this.put('products', product);
-    supabaseService.syncProduct(product);
+    await this.ensureSupabase();
+    await supabaseService.syncProduct(product);
     return product;
   }
 
   async deleteProduct(id) {
-    supabaseService.deleteProduct(id);
+    await this.ensureSupabase();
+    const existing = await this.get('products', id);
+    if (existing) {
+      await supabaseService.deleteProduct(id, existing.code);
+    } else {
+      await supabaseService.deleteProduct(id);
+    }
     return await this.delete('products', id);
   }
 
@@ -287,12 +307,14 @@ class PosStorage {
       category.id = `cat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
     await this.put('categories', category);
-    supabaseService.syncCategory(category);
+    await this.ensureSupabase();
+    await supabaseService.syncCategory(category);
     return category;
   }
 
   async deleteCategory(id) {
-    supabaseService.deleteCategory(id);
+    await this.ensureSupabase();
+    await supabaseService.deleteCategory(id);
     return await this.delete('categories', id);
   }
 
@@ -305,12 +327,14 @@ class PosStorage {
       market.id = `mkt-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
     await this.put('markets', market);
-    supabaseService.syncMarket(market);
+    await this.ensureSupabase();
+    await supabaseService.syncMarket(market);
     return market;
   }
 
   async deleteMarket(id) {
-    supabaseService.deleteMarket(id);
+    await this.ensureSupabase();
+    await supabaseService.deleteMarket(id);
     return await this.delete('markets', id);
   }
 
@@ -333,6 +357,12 @@ class PosStorage {
     return sales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   }
 
+  async deleteSale(id) {
+    await this.ensureSupabase();
+    await supabaseService.deleteSale(id);
+    return await this.delete('sales', id);
+  }
+
   async saveSale(saleData) {
     const sale = {
       id: saleData.id || `sale-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -351,7 +381,8 @@ class PosStorage {
     };
 
     await this.put('sales', sale);
-    supabaseService.syncSale(sale);
+    await this.ensureSupabase();
+    await supabaseService.syncSale(sale);
 
     // Optional stock decrement
     const products = await this.getProducts();
@@ -360,7 +391,7 @@ class PosStorage {
       if (product && typeof product.stock === 'number') {
         product.stock = Math.max(0, product.stock - (item.quantity || 1));
         await this.put('products', product);
-        supabaseService.syncProduct(product);
+        await supabaseService.syncProduct(product);
       }
     }
 
@@ -506,7 +537,7 @@ class PosStorage {
       sales: await this.getSales()
     };
 
-    const res = await supabaseService.pushAllLocalData(localData);
+    const res = await supabaseService.pushAllLocalData(localData, { overwriteAll: true });
     if (!res) {
       return { success: false, message: 'Failed to upload local data to Supabase.' };
     }
