@@ -241,19 +241,19 @@ export default function AnalyticsView({ sales = [], currencySymbol = '€' }) {
     };
   }, [stats]);
 
-  // Shared Dark Chart Options
+  // Shared Light Chart Options
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 12 } }
+        labels: { color: '#475569', font: { family: 'Plus Jakarta Sans', size: 12 } }
       },
       tooltip: {
-        backgroundColor: 'rgba(17, 24, 39, 0.95)',
-        titleColor: '#f8fafc',
-        bodyColor: '#10b981',
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        titleColor: '#ffffff',
+        bodyColor: '#34d399',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
         borderWidth: 1,
         padding: 10,
         boxPadding: 4,
@@ -262,12 +262,12 @@ export default function AnalyticsView({ sales = [], currencySymbol = '€' }) {
     },
     scales: {
       x: {
-        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-        ticks: { color: '#94a3b8', font: { size: 11 } }
+        grid: { color: 'rgba(0, 0, 0, 0.05)' },
+        ticks: { color: '#64748b', font: { size: 11 } }
       },
       y: {
-        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-        ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 11 } }
+        grid: { color: 'rgba(0, 0, 0, 0.05)' },
+        ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } }
       }
     }
   };
@@ -278,7 +278,7 @@ export default function AnalyticsView({ sales = [], currencySymbol = '€' }) {
     plugins: {
       legend: {
         position: 'right',
-        labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 12 } }
+        labels: { color: '#475569', font: { family: 'Plus Jakarta Sans', size: 12 } }
       },
       tooltip: chartOptions.plugins.tooltip
     }
