@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Printer, Barcode as BarcodeIcon, QrCode, CheckSquare, Square, Search, Filter, Plus, Minus, Check, Layers, Eye } from 'lucide-react';
+import {
+  X, Printer, Barcode as BarcodeIcon, QrCode, CheckSquare, Square,
+  Search, Filter, Plus, Minus, Check, Layers, Eye, PackageCheck, Sliders
+} from 'lucide-react';
 import { renderBarcode, renderQRCode, formatCurrency } from '../utils/exportUtils';
 
 export default function LabelPrinterModal({ isOpen, onClose, products = [], categories = [], currencySymbol = '€' }) {
@@ -8,6 +11,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [onlyInStock, setOnlyInStock] = useState(false);
   const [viewMode, setViewMode] = useState('select'); // 'select' | 'preview'
 
   // Selection state: Map of productId -> quantity of stickers to print
@@ -25,18 +29,24 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
 
   const labelsContainerRef = useRef(null);
 
-  // Filter products by search & category
+  // In-stock products count
+  const inStockProductsCount = useMemo(() => {
+    return products.filter(p => typeof p.stock === 'number' ? p.stock > 0 : true).length;
+  }, [products]);
+
+  // Filter products by search, category & stock
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       const matchCat = selectedCategory === 'all' || p.category === selectedCategory;
+      const matchStock = !onlyInStock || (typeof p.stock === 'number' ? p.stock > 0 : true);
       const q = searchQuery.toLowerCase().trim();
       const matchSearch = !q ||
         p.name.toLowerCase().includes(q) ||
         (p.code && p.code.toLowerCase().includes(q)) ||
         (p.category && p.category.toLowerCase().includes(q));
-      return matchCat && matchSearch;
+      return matchCat && matchStock && matchSearch;
     });
-  }, [products, selectedCategory, searchQuery]);
+  }, [products, selectedCategory, searchQuery, onlyInStock]);
 
   // Total stickers to print calculation
   const totalStickersCount = useMemo(() => {
@@ -111,6 +121,24 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
     }
   };
 
+  // Select all in-stock products only
+  const selectInStockOnly = () => {
+    const inStockIds = products.filter(p => typeof p.stock === 'number' ? p.stock > 0 : true).map(p => p.id);
+    setSelectedProductIds(inStockIds);
+  };
+
+  // Match label quantities to actual stock counts
+  const matchQuantitiesToStock = () => {
+    setItemQuantities(prev => {
+      const updated = { ...prev };
+      products.forEach(p => {
+        const stockCount = typeof p.stock === 'number' ? Math.max(1, p.stock) : 1;
+        updated[p.id] = stockCount;
+      });
+      return updated;
+    });
+  };
+
   // Select all products in catalog
   const selectAllProducts = () => {
     setSelectedProductIds(products.map(p => p.id));
@@ -153,7 +181,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal-content"
-        style={{ maxWidth: '900px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+        style={{ maxWidth: '940px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -164,7 +192,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
               <span>Barcode & QR Price Sticker Generator</span>
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Filter products, select quantities, and print scannable barcode stickers
+              Filter products, select in-stock items, set print quantities, and print scannable stickers
             </p>
           </div>
           <button className="btn btn-secondary btn-icon" onClick={onClose} title="Close">
@@ -203,7 +231,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
               borderRadius: 'var(--radius-md)',
               padding: '0.75rem',
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
               gap: '0.65rem',
               alignItems: 'center'
             }}>
@@ -249,6 +277,18 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
                 </select>
               </div>
 
+              {/* In-Stock Filter Toggle */}
+              <button
+                type="button"
+                className={`btn ${onlyInStock ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.35rem 0.65rem', fontSize: '0.78rem', minHeight: '38px' }}
+                onClick={() => setOnlyInStock(!onlyInStock)}
+                title="Filter products to only show in-stock items"
+              >
+                <PackageCheck size={14} />
+                <span>In-Stock Only ({inStockProductsCount})</span>
+              </button>
+
               {/* Code Format Toggle (Barcode vs QR) */}
               <div style={{ display: 'flex', gap: '0.35rem' }}>
                 <button
@@ -263,7 +303,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
                   style={{ flex: 1, padding: '0.35rem 0.6rem', fontSize: '0.78rem', minHeight: '38px' }}
                   onClick={() => setLabelFormat('qrcode')}
                 >
-                  <QrCode size={14} /> QR Code
+                  <QrCode size={14} /> QR
                 </button>
               </div>
             </div>
@@ -278,6 +318,26 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
                 >
                   {allFilteredSelected ? <Square size={14} /> : <CheckSquare size={14} />}
                   <span>{allFilteredSelected ? 'Deselect Filtered' : `Select Filtered (${filteredProducts.length})`}</span>
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.7rem', fontSize: '0.78rem', minHeight: '32px', borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                  onClick={selectInStockOnly}
+                  title="Select only products that have stock > 0"
+                >
+                  <PackageCheck size={14} />
+                  <span>Select In-Stock Only ({inStockProductsCount})</span>
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.7rem', fontSize: '0.78rem', minHeight: '32px' }}
+                  onClick={matchQuantitiesToStock}
+                  title="Set print quantities to match inventory stock for all products"
+                >
+                  <Sliders size={14} />
+                  <span>Match Quantities to Stock</span>
                 </button>
 
                 <button
@@ -324,6 +384,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
               {filteredProducts.map((p) => {
                 const isSelected = selectedProductIds.includes(p.id);
                 const qty = itemQuantities[p.id] || 1;
+                const inStock = typeof p.stock === 'number' ? p.stock > 0 : true;
 
                 return (
                   <div
@@ -367,6 +428,16 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
                           <span style={{ fontFamily: 'var(--font-mono)' }}>{p.code}</span>
                           <span>•</span>
                           <span>{p.category}</span>
+                          <span>•</span>
+                          <span style={{
+                            color: inStock ? 'var(--primary)' : '#dc2626',
+                            fontWeight: 600,
+                            background: inStock ? '#ecfdf5' : '#fef2f2',
+                            padding: '0.1rem 0.4rem',
+                            borderRadius: '4px'
+                          }}>
+                            {inStock ? `Stock: ${p.stock} ${p.unit || 'un'}` : 'Out of stock (0)'}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -406,7 +477,7 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
 
               {filteredProducts.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
-                  No products match "{searchQuery}" in category "{selectedCategory}".
+                  No products match your current filters.
                 </div>
               )}
             </div>
@@ -418,87 +489,88 @@ export default function LabelPrinterModal({ isOpen, onClose, products = [], cate
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setViewMode('preview')}
-                  disabled={selectedProductIds.length === 0}
-                >
-                  <Eye size={15} /> Preview Sheet
+                <button className="btn btn-secondary" onClick={onClose}>
+                  Cancel
                 </button>
                 <button
                   className="btn btn-primary"
-                  onClick={handlePrint}
-                  disabled={totalStickersCount === 0}
+                  disabled={selectedProductIds.length === 0}
+                  onClick={() => setViewMode('preview')}
                 >
-                  <Printer size={15} /> Print Labels ({totalStickersCount})
+                  <Eye size={16} />
+                  <span>Preview & Print ({totalStickersCount})</span>
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ===================== VIEW 2: LIVE PRINT PREVIEW SHEET ===================== */}
+        {/* ===================== VIEW 2: PREVIEW & PRINT STICKER SHEET ===================== */}
         {viewMode === 'preview' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem', overflow: 'hidden' }}>
-            <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Printing <strong>{totalStickersCount}</strong> scannable labels ({labelFormat.toUpperCase()})
-              </span>
+            {/* Top Toolbar in Preview Mode */}
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                onClick={() => setViewMode('select')}
+              >
+                ← Back to Selection
+              </button>
 
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setViewMode('select')}
-                >
-                  <Filter size={15} /> Edit Selection
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Sheet Preview: <strong>{itemsToRender.length}</strong> stickers
+                </span>
+
                 <button
                   className="btn btn-primary"
+                  style={{ padding: '0.45rem 1rem' }}
                   onClick={handlePrint}
-                  disabled={itemsToRender.length === 0}
                 >
-                  <Printer size={15} /> Print Now
+                  <Printer size={16} />
+                  <span>Print Sticker Sheet</span>
                 </button>
               </div>
             </div>
 
-            {/* Printable Sticker Sheet */}
+            {/* Print Sheet Container */}
             <div
               ref={labelsContainerRef}
-              className="printable-area labels-sheet-preview"
-              style={{ flex: 1, maxHeight: '480px', overflowY: 'auto' }}
+              className="printable-sticker-sheet"
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 'var(--radius-md)',
+                padding: '1.25rem'
+              }}
             >
-              {itemsToRender.map((product, idx) => (
-                <div key={`${product.id}-${idx}`} className="label-sticker">
-                  <div className="label-sticker-title">{product.name}</div>
-                  <div className="label-sticker-price">
-                    {formatCurrency(product.price, currencySymbol)}
+              <div className="labels-grid">
+                {itemsToRender.map((p, idx) => (
+                  <div key={`${p.id}-${idx}`} className="label-sticker-card">
+                    <div className="label-product-name">{p.name}</div>
+                    <div className="label-product-price">
+                      {p.price ? Number(p.price).toFixed(2) : '0.00'} {currencySymbol}
+                    </div>
+
+                    <div className="label-code-graphic">
+                      {labelFormat === 'barcode' ? (
+                        <svg className="barcode-target-svg" data-code={p.code} />
+                      ) : (
+                        <canvas className="qrcode-target-canvas" data-code={p.code} />
+                      )}
+                    </div>
                   </div>
+                ))}
 
-                  {labelFormat === 'barcode' ? (
-                    <svg
-                      className="barcode-target-svg"
-                      data-code={product.code || '000000'}
-                      style={{ maxWidth: '100%' }}
-                    />
-                  ) : (
-                    <canvas
-                      className="qrcode-target-canvas"
-                      data-code={product.code || '000000'}
-                    />
-                  )}
-
-                  <div style={{ fontSize: '9px', color: '#64748b', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                    {product.category}
+                {itemsToRender.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
+                    No products selected. Click "Back to Selection" to choose products to print.
                   </div>
-                </div>
-              ))}
-
-              {itemsToRender.length === 0 && (
-                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-                  No products selected to print. Switch to the Selection tab above to select items.
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
