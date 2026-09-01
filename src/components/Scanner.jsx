@@ -1,0 +1,397 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Camera, CameraOff, Flashlight, RefreshCw, Barcode, CheckCircle, AlertCircle } from 'lucide-react';
+import { audioService } from '../utils/audio';
+
+export default function Scanner({ onScanSuccess, onScanError, isScannerActive, setIsScannerActive }) {
+  const [scannerStarted, setScannerStarted] = useState(false);
+  const [cameras, setCameras] = useState([]);
+  const [activeCameraId, setActiveCameraId] = useState(null);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+  const [manualCode, setManualCode] = useState('');
+  const [lastScannedCode, setLastScannedCode] = useState(null);
+  const [scanFeedback, setScanFeedback] = useState(null);
+
+  const html5QrCodeRef = useRef(null);
+  const lastScanTimestampRef = useRef(0);
+  const readerElementId = 'pos-camera-reader';
+
+  // Initialize camera list
+  useEffect(() => {
+    Html5Qrcode.getCameras()
+      .then((devices) => {
+        if (devices && devices.length > 0) {
+          setCameras(devices);
+          // Prefer back/rear camera on mobile
+          const backCam = devices.find(d => 
+            d.label.toLowerCase().includes('back') || 
+            d.label.toLowerCase().includes('rear') || 
+            d.label.toLowerCase().includes('environment')
+          );
+          setActiveCameraId(backCam ? backCam.id : devices[0].id);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not enumerate cameras:', err);
+      });
+  }, []);
+
+  // Start / Stop Scanner Effect
+  useEffect(() => {
+    let isMounted = true;
+
+    async function startScanner() {
+      if (!isScannerActive) return;
+
+      try {
+        setCameraError(null);
+        if (!html5QrCodeRef.current) {
+          html5QrCodeRef.current = new Html5Qrcode(readerElementId, {
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.QR_CODE,
+              Html5QrcodeSupportedFormats.ITF
+            ],
+            verbose: false
+          });
+        }
+
+        const config = {
+          fps: 15,
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            return {
+              width: Math.floor(minEdge * 0.8),
+              height: Math.floor(minEdge * 0.55)
+            };
+          },
+          aspectRatio: 1.6
+        };
+
+        const cameraIdOrConfig = activeCameraId ? activeCameraId : { facingMode: 'environment' };
+
+        await html5QrCodeRef.current.start(
+          cameraIdOrConfig,
+          config,
+          (decodedText, decodedResult) => {
+            const now = Date.now();
+            // Debounce: prevent duplicate trigger within 1.2s for same code
+            if (decodedText === lastScanTimestampRef.current.code && (now - lastScanTimestampRef.current.time) < 1200) {
+              return;
+            }
+
+            lastScanTimestampRef.current = { code: decodedText, time: now };
+            setLastScannedCode(decodedText);
+            
+            // Audio & Haptic feedback
+            audioService.playScanBeep();
+
+            // Visual feedback banner
+            setScanFeedback({ success: true, text: decodedText });
+            setTimeout(() => setScanFeedback(null), 2500);
+
+            if (onScanSuccess) {
+              onScanSuccess(decodedText);
+            }
+          },
+          (errorMessage) => {
+            // Frame parse non-match is normal during scanning, ignore
+          }
+        );
+
+        if (isMounted) {
+          setScannerStarted(true);
+          checkTorchCapability();
+        }
+      } catch (err) {
+        console.error('Failed to start camera scanner:', err);
+        if (isMounted) {
+          setScannerStarted(false);
+          setCameraError(err.message || 'Camera permission denied or camera unavailable');
+        }
+      }
+    }
+
+    if (isScannerActive) {
+      startScanner();
+    } else {
+      stopScanner();
+    }
+
+    return () => {
+      isMounted = false;
+      stopScanner();
+    };
+  }, [isScannerActive, activeCameraId]);
+
+  const stopScanner = async () => {
+    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+      try {
+        await html5QrCodeRef.current.stop();
+      } catch (e) {
+        console.warn('Error stopping scanner:', e);
+      }
+    }
+    setScannerStarted(false);
+    setTorchOn(false);
+  };
+
+  // Check if camera supports flashlight/torch
+  const checkTorchCapability = () => {
+    try {
+      const videoElement = document.querySelector(`#${readerElementId} video`);
+      if (videoElement && videoElement.srcObject) {
+        const track = videoElement.srcObject.getVideoTracks()[0];
+        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        if (capabilities.torch) {
+          setTorchSupported(true);
+        }
+      }
+    } catch (e) {
+      setTorchSupported(false);
+    }
+  };
+
+  // Toggle Torch/Flashlight
+  const toggleTorch = async () => {
+    try {
+      const videoElement = document.querySelector(`#${readerElementId} video`);
+      if (videoElement && videoElement.srcObject) {
+        const track = videoElement.srcObject.getVideoTracks()[0];
+        const newState = !torchOn;
+        await track.applyConstraints({
+          advanced: [{ torch: newState }]
+        });
+        setTorchOn(newState);
+      }
+    } catch (err) {
+      console.warn('Torch toggle failed:', err);
+    }
+  };
+
+  // Switch between available cameras
+  const switchCamera = () => {
+    if (cameras.length <= 1) return;
+    const currentIndex = cameras.findIndex(c => c.id === activeCameraId);
+    const nextIndex = (currentIndex + 1) % cameras.length;
+    stopScanner().then(() => {
+      setActiveCameraId(cameras[nextIndex].id);
+    });
+  };
+
+  // Handle manual code submission
+  const handleManualSubmit = (e) => {
+    e.preventDefault();
+    if (!manualCode.trim()) return;
+
+    audioService.playScanBeep();
+    setLastScannedCode(manualCode.trim());
+    setScanFeedback({ success: true, text: manualCode.trim() });
+    setTimeout(() => setScanFeedback(null), 2500);
+
+    if (onScanSuccess) {
+      onScanSuccess(manualCode.trim());
+    }
+    setManualCode('');
+  };
+
+  return (
+    <div className="pos-card scanner-card" style={{ position: 'relative', width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.65rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <div style={{
+            width: '26px',
+            height: '26px',
+            borderRadius: '6px',
+            background: isScannerActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+            color: isScannerActive ? 'var(--primary)' : 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <Camera size={15} />
+          </div>
+          <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
+            Live Barcode Scanner
+          </span>
+        </div>
+
+        <button
+          className={`btn ${isScannerActive ? 'btn-secondary' : 'btn-primary'}`}
+          style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', minHeight: '32px' }}
+          onClick={() => setIsScannerActive(!isScannerActive)}
+        >
+          {isScannerActive ? (
+            <>
+              <CameraOff size={13} /> Pause
+            </>
+          ) : (
+            <>
+              <Camera size={13} /> Open Camera
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Scanner Box Viewport */}
+      {isScannerActive ? (
+        <div className="scanner-box" style={{ width: '100%' }}>
+          <div id={readerElementId} className="scanner-viewport">
+            {!scannerStarted && !cameraError && (
+              <div style={{ color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem' }}>
+                <RefreshCw size={22} className="spin-animation" />
+                <span style={{ fontSize: '0.8rem' }}>Starting camera...</span>
+              </div>
+            )}
+
+            {cameraError && (
+              <div style={{ padding: '1.25rem 1rem', textAlign: 'center', color: '#f87171' }}>
+                <AlertCircle size={28} style={{ margin: '0 auto 0.4rem' }} />
+                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Camera Unavailable</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  {cameraError}
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  style={{ marginTop: '0.6rem', fontSize: '0.75rem', minHeight: '30px' }}
+                  onClick={() => setIsScannerActive(true)}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Scanner Reticle & Laser */}
+          {scannerStarted && (
+            <div className="scanner-overlay">
+              <div className="scanner-reticle">
+                <div className="scanner-laser" />
+              </div>
+            </div>
+          )}
+
+          {/* Scanner Controls Bar */}
+          {scannerStarted && (
+            <div className="scanner-controls-bar">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: 'var(--primary)' }}>
+                <span className="market-pill-dot" /> Active
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                {torchSupported && (
+                  <button
+                    className={`btn btn-secondary btn-icon ${torchOn ? 'active' : ''}`}
+                    style={{ width: '32px', height: '32px', minHeight: '32px' }}
+                    onClick={toggleTorch}
+                    title="Toggle Flashlight"
+                  >
+                    <Flashlight size={14} color={torchOn ? '#f59e0b' : 'inherit'} />
+                  </button>
+                )}
+
+                {cameras.length > 1 && (
+                  <button
+                    className="btn btn-secondary btn-icon"
+                    style={{ width: '32px', height: '32px', minHeight: '32px' }}
+                    onClick={switchCamera}
+                    title="Switch Camera"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          onClick={() => setIsScannerActive(true)}
+          style={{
+            background: 'var(--bg-input)',
+            border: '1px dashed var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            padding: '1rem',
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'var(--transition)',
+            width: '100%',
+            boxSizing: 'border-box'
+          }}
+        >
+          <Camera size={24} color="var(--primary)" style={{ margin: '0 auto 0.35rem' }} />
+          <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Camera scanner paused</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+            Tap to open camera or type barcode below
+          </div>
+        </div>
+      )}
+
+      {/* Scanned Feedback Notification Toast */}
+      {scanFeedback && (
+        <div style={{
+          position: 'absolute',
+          top: '3.5rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(16, 185, 129, 0.95)',
+          color: 'white',
+          padding: '0.35rem 0.85rem',
+          borderRadius: 'var(--radius-full)',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          zIndex: 10,
+          animation: 'fadeIn 0.2s ease-out',
+          whiteSpace: 'nowrap'
+        }}>
+          <CheckCircle size={14} />
+          Scanned: <span style={{ fontFamily: 'var(--font-mono)' }}>{scanFeedback.text}</span>
+        </div>
+      )}
+
+      {/* Manual Barcode / SKU Input Bar */}
+      <form onSubmit={handleManualSubmit} className="manual-barcode-form">
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <input
+            type="text"
+            className="input-styled input-mono"
+            placeholder="Type barcode or SKU..."
+            value={manualCode}
+            onChange={(e) => setManualCode(e.target.value)}
+            style={{ paddingLeft: '2.2rem', fontSize: '0.82rem' }}
+          />
+          <Barcode
+            size={15}
+            style={{
+              position: 'absolute',
+              left: '0.75rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--text-muted)'
+            }}
+          />
+        </div>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={!manualCode.trim()}
+          style={{ padding: '0.55rem 0.85rem', fontSize: '0.8rem', minHeight: '38px', flexShrink: 0 }}
+        >
+          Add
+        </button>
+      </form>
+    </div>
+  );
+}
