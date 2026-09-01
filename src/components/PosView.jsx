@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Search, Plus, Minus, Trash2, ArrowRight, Sparkles, AlertCircle, Tag, Layers, Package, CreditCard } from 'lucide-react';
+import { ShoppingBag, Search, Plus, Minus, Trash2, ArrowRight, AlertCircle, Package } from 'lucide-react';
 import Scanner from './Scanner';
 import QuantityKeypadModal from './QuantityKeypadModal';
 import CheckoutModal from './CheckoutModal';
@@ -115,7 +115,7 @@ export default function PosView({
 
   return (
     <div>
-      {/* Mobile Segmented View Switcher */}
+      {/* Mobile Segmented View Switcher (Hidden on Desktop) */}
       <div className="mobile-pos-switcher">
         <button
           className={`mobile-pos-switch-btn ${mobileTab === 'catalog' ? 'active' : ''}`}
@@ -136,15 +136,7 @@ export default function PosView({
 
       <div className="pos-grid">
         {/* Left Column: Scanner & Product Catalog */}
-        <div
-          style={{
-            display: mobileTab === 'cart' ? undefined : 'flex',
-            flexDirection: 'column',
-            gap: '1rem',
-            width: '100%'
-          }}
-          className={mobileTab === 'cart' ? 'mobile-hidden' : ''}
-        >
+        <div className={`pos-catalog-column ${mobileTab === 'cart' ? 'mobile-hidden' : ''}`}>
           {/* Scanner Component */}
           <Scanner
             onScanSuccess={handleScanCode}
@@ -284,10 +276,8 @@ export default function PosView({
           </div>
         </div>
 
-        {/* Right Column: POS Cart & Checkout */}
-        <div
-          className={`pos-card cart-panel ${mobileTab === 'catalog' ? 'mobile-hidden' : ''}`}
-        >
+        {/* Right Column: POS Cart & Checkout (Always visible on Desktop, togglable on Mobile) */}
+        <div className={`pos-card cart-panel ${mobileTab === 'catalog' ? 'mobile-hidden' : ''}`}>
           <div className="cart-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <div style={{
@@ -434,7 +424,7 @@ export default function PosView({
         </div>
       </div>
 
-      {/* Floating Bottom Quick Cart Bar on Mobile (when on catalog tab and cart has items) */}
+      {/* Floating Bottom Quick Cart Bar on Mobile (only when on catalog tab and cart has items) */}
       {cart.length > 0 && mobileTab === 'catalog' && (
         <div
           className="mobile-floating-cart-bar visible"
