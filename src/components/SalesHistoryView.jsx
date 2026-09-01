@@ -39,13 +39,18 @@ export default function SalesHistoryView({ sales = [], markets = [], currencySym
           if (saleDate < thirtyDaysAgo) return false;
         }
       }
-      // Search query (search in items, market name, sale ID)
+      // Search query (search in items name & barcode, market name, sale ID, notes)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchesId = sale.id && sale.id.toLowerCase().includes(q);
         const matchesMarket = sale.market && sale.market.toLowerCase().includes(q);
-        const matchesItem = sale.items && sale.items.some(i => i.name && i.name.toLowerCase().includes(q));
-        if (!matchesId && !matchesMarket && !matchesItem) {
+        const matchesNotes = sale.notes && sale.notes.toLowerCase().includes(q);
+        const matchesItem = sale.items && sale.items.some(i => 
+          (i.name && i.name.toLowerCase().includes(q)) ||
+          (i.code && i.code.toString().toLowerCase().includes(q)) ||
+          (i.category && i.category.toLowerCase().includes(q))
+        );
+        if (!matchesId && !matchesMarket && !matchesItem && !matchesNotes) {
           return false;
         }
       }
@@ -107,7 +112,7 @@ export default function SalesHistoryView({ sales = [], markets = [], currencySym
             <input
               type="text"
               className="input-styled"
-              placeholder="Search by item, market or ID..."
+              placeholder="Search by product, barcode, market, or sale ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ paddingLeft: '2.4rem' }}
@@ -256,6 +261,11 @@ export default function SalesHistoryView({ sales = [], markets = [], currencySym
                 >
                   <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{item.quantity}x</span>
                   <span>{item.name}</span>
+                  {item.code && (
+                    <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                      [{item.code}]
+                    </span>
+                  )}
                   <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
                     ({(item.price * item.quantity).toFixed(2)}{currencySymbol})
                   </span>

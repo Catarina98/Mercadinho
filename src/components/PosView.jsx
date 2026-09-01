@@ -319,8 +319,13 @@ export default function PosView({
                 <div key={item.id} className="cart-item-row">
                   <div className="cart-item-info">
                     <div className="cart-item-name">{item.name}</div>
-                    <div className="cart-item-unit-price">
-                      {item.price.toFixed(2)} {currencySymbol} / unit
+                    <div className="cart-item-unit-price" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span>{item.price.toFixed(2)} {currencySymbol}</span>
+                      {item.code && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          • {item.code}
+                        </span>
+                      )}
                     </div>
                   </div>
 

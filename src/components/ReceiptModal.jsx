@@ -16,7 +16,7 @@ Market: ${sale.market}
 Date: ${formatDateTime(sale.timestamp)}
 Receipt #${sale.id}
 ----------------------
-${sale.items.map(i => `${i.quantity}x ${i.name} - ${i.total.toFixed(2)}${currencySymbol}`).join('\n')}
+${sale.items.map(i => `${i.quantity}x ${i.name} ${i.code ? `[${i.code}] ` : ''}- ${i.total.toFixed(2)}${currencySymbol}`).join('\n')}
 ----------------------
 Subtotal: ${sale.subtotal.toFixed(2)}${currencySymbol}
 Discount: -${sale.discount.toFixed(2)}${currencySymbol}
@@ -65,20 +65,25 @@ Obrigado pela sua compra!
               <tr>
                 <th style={{ textAlign: 'left' }}>Item</th>
                 <th style={{ textAlign: 'center', width: '35px' }}>Qty</th>
-                <th style={{ textAlign: 'right', width: '60px' }}>Total</th>
+                <th style={{ textAlign: 'right', width: '65px' }}>Total</th>
               </tr>
             </thead>
             <tbody>
               {sale.items.map((item, idx) => (
                 <tr key={idx}>
-                  <td style={{ fontSize: '11px' }}>
-                    <div>{item.name}</div>
-                    <div style={{ fontSize: '9px', color: '#6b7280' }}>
-                      @{item.price.toFixed(2)} {currencySymbol}
+                  <td style={{ fontSize: '11px', padding: '3px 0' }}>
+                    <div style={{ fontWeight: 600 }}>{item.name}</div>
+                    <div style={{ fontSize: '9px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '1px' }}>
+                      <span>@{item.price.toFixed(2)} {currencySymbol}</span>
+                      {item.code && (
+                        <span style={{ fontFamily: 'monospace', color: '#1f2937', fontWeight: 600 }}>
+                          • {item.code}
+                        </span>
+                      )}
                     </div>
                   </td>
-                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{item.quantity}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold' }}>
+                  <td style={{ textAlign: 'center', fontWeight: 'bold', verticalAlign: 'top', paddingTop: '4px' }}>{item.quantity}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', verticalAlign: 'top', paddingTop: '4px' }}>
                     {item.total.toFixed(2)} {currencySymbol}
                   </td>
                 </tr>

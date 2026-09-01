@@ -319,7 +319,7 @@ class PosStorage {
     if (raw) {
       try {
         return JSON.parse(raw);
-      } catch (e) {}
+      } catch (e) { }
     }
     return DEFAULT_MARKETS[0];
   }
@@ -380,7 +380,7 @@ class PosStorage {
   async saveSettings(newSettings) {
     const updated = { key: 'config', ...newSettings };
     await this.put('settings', updated);
-    
+
     // Initialize or reconfigure Supabase client
     if (updated.supabaseUrl && updated.supabaseAnonKey) {
       supabaseService.init(updated.supabaseUrl, updated.supabaseAnonKey);
@@ -540,7 +540,7 @@ class PosStorage {
   }
 
   async importFullBackup(backupData) {
-    if (!backupData || !backupData.data) {
+    if (!backupData?.data) {
       throw new Error('Invalid backup file format');
     }
 
