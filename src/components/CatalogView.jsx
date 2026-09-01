@@ -465,6 +465,7 @@ export default function CatalogView({
           isOpen={isLabelModalOpen}
           onClose={() => setIsLabelModalOpen(false)}
           products={products}
+          categories={categories}
           currencySymbol={currencySymbol}
         />
       )}
