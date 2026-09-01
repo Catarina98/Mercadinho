@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Settings, MapPin, Plus, Trash2, Volume2, VolumeX, Smartphone, DollarSign, Database, Download, Upload, RefreshCcw, Check, Store, Cloud, CloudOff, RefreshCw, Copy, CheckCheck, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Settings, MapPin, Plus, Trash2, Volume2, VolumeX, Smartphone, DollarSign, Database, Download, Upload, RefreshCcw, Check, Store, Cloud, CloudOff, RefreshCw, Copy, CheckCheck, ExternalLink, ShieldCheck, Layers } from 'lucide-react';
 import { downloadJSON } from '../utils/exportUtils';
 import { audioService } from '../utils/audio';
 import { SUPABASE_SQL_SCHEMA, supabaseService } from '../db/supabase';
@@ -47,6 +47,8 @@ export default function SettingsView({
   };
 
   const handleSyncCloud = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) return;
+
     setSyncStatus({ type: 'loading', message: 'Connecting and synchronizing data with Supabase...' });
     
     // Save settings first
@@ -62,6 +64,63 @@ export default function SettingsView({
       if (onRefreshAllData) onRefreshAllData();
     } else {
       setSyncStatus({ type: 'error', message: res.message });
+    }
+  };
+
+  const handlePullFromCloud = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      alert('Please enter your Supabase Project URL and Anon Key first.');
+      return;
+    }
+
+    if (!confirm('⚠️ WARNING: This will DELETE all local products, categories, markets, and sales from this browser and replace them with the data stored in your remote Supabase database. Are you sure you want to proceed?')) {
+      return;
+    }
+
+    setSyncStatus({ type: 'loading', message: 'Wiping local storage and downloading remote database...' });
+
+    await onSaveSettings({
+      ...settings,
+      supabaseUrl: supabaseUrl.trim(),
+      supabaseAnonKey: supabaseAnonKey.trim()
+    });
+
+    const res = await db.pullFromCloudAndReplaceLocal();
+    if (res.success) {
+      setSyncStatus({ type: 'success', message: res.message });
+      if (onRefreshAllData) onRefreshAllData();
+      alert('✅ ' + res.message);
+    } else {
+      setSyncStatus({ type: 'error', message: res.message });
+      alert('❌ ' + res.message);
+    }
+  };
+
+  const handlePushToCloud = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      alert('Please enter your Supabase Project URL and Anon Key first.');
+      return;
+    }
+
+    if (!confirm('This will upload all your local products, categories, markets, and sales to your remote Supabase cloud database. Proceed?')) {
+      return;
+    }
+
+    setSyncStatus({ type: 'loading', message: 'Uploading local data to Supabase cloud...' });
+
+    await onSaveSettings({
+      ...settings,
+      supabaseUrl: supabaseUrl.trim(),
+      supabaseAnonKey: supabaseAnonKey.trim()
+    });
+
+    const res = await db.pushAllLocalDataToCloud();
+    if (res.success) {
+      setSyncStatus({ type: 'success', message: res.message });
+      alert('✅ ' + res.message);
+    } else {
+      setSyncStatus({ type: 'error', message: res.message });
+      alert('❌ ' + res.message);
     }
   };
 
@@ -253,24 +312,70 @@ export default function SettingsView({
           )}
 
           {/* Cloud Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={handleCopySql}
-              title="Copy the SQL code to paste into Supabase SQL Editor"
-            >
-              {copiedSql ? <CheckCheck size={16} color="var(--primary)" /> : <Copy size={16} />}
-              <span>{copiedSql ? 'SQL Snippet Copied!' : 'Copy Supabase SQL Setup Code'}</span>
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.6rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCopySql}
+                title="Copy the SQL code to paste into Supabase SQL Editor"
+              >
+                {copiedSql ? <CheckCheck size={16} color="var(--primary)" /> : <Copy size={16} />}
+                <span>{copiedSql ? 'SQL Snippet Copied!' : 'Copy Supabase SQL Setup Code'}</span>
+              </button>
 
-            <button
-              className="btn btn-primary"
-              onClick={handleSyncCloud}
-              disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
-            >
-              <RefreshCw size={16} className={syncStatus?.type === 'loading' ? 'spin-animation' : ''} />
-              <span>Test Connection & Sync Now</span>
-            </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSyncCloud}
+                disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
+              >
+                <RefreshCw size={16} className={syncStatus?.type === 'loading' ? 'spin-animation' : ''} />
+                <span>Test & 2-Way Sync</span>
+              </button>
+            </div>
+
+            {/* Cloud Override Actions: Pull and Push */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.85rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.6rem'
+            }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Layers size={15} color="var(--primary)" />
+                <span>Cloud Database Overwrite & Sync Options</span>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ flex: 1, minWidth: '220px', fontSize: '0.8rem', padding: '0.5rem 0.85rem' }}
+                  onClick={handlePullFromCloud}
+                  disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
+                  title="Wipe local browser data and load everything stored in your Supabase database"
+                >
+                  <Download size={14} />
+                  <span>Delete Local Data & Load from Database</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ flex: 1, minWidth: '200px', fontSize: '0.8rem', padding: '0.5rem 0.85rem' }}
+                  onClick={handlePushToCloud}
+                  disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
+                  title="Upload all local products, categories, markets, and sales from this browser to Supabase"
+                >
+                  <Upload size={14} />
+                  <span>Upload Local Data to Cloud</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

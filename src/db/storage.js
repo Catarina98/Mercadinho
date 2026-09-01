@@ -434,6 +434,89 @@ class PosStorage {
     };
   }
 
+  // Wipe local data completely and replace with cloud database records
+  async pullFromCloudAndReplaceLocal() {
+    const settings = await this.getSettings();
+    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
+      return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
+    }
+
+    supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
+    const isConn = await supabaseService.testConnection();
+    if (!isConn) {
+      return { success: false, message: 'Could not connect to Supabase. Please verify your Project URL and Anon Key.' };
+    }
+
+    const remote = await supabaseService.fetchRemoteData();
+    if (!remote) {
+      return { success: false, message: 'Failed to fetch data from Supabase tables.' };
+    }
+
+    // 1. Wipe local database stores
+    await this.clear('products');
+    await this.clear('categories');
+    await this.clear('markets');
+    await this.clear('sales');
+
+    // 2. Insert all remote records
+    const prods = remote.products || [];
+    const cats = remote.categories || [];
+    const mkts = remote.markets || [];
+    const sales = remote.sales || [];
+
+    for (const p of prods) await this.put('products', p);
+    for (const c of cats) await this.put('categories', c);
+    for (const m of mkts) await this.put('markets', m);
+    for (const s of sales) await this.put('sales', s);
+
+    if (mkts.length > 0) {
+      const activeM = mkts.find(m => m.active) || mkts[0];
+      this.setActiveMarket(activeM);
+    }
+
+    return {
+      success: true,
+      message: `Successfully replaced local data! Loaded ${prods.length} products, ${cats.length} categories, ${mkts.length} markets, and ${sales.length} sales from your cloud database.`,
+      counts: {
+        products: prods.length,
+        categories: cats.length,
+        markets: mkts.length,
+        sales: sales.length
+      }
+    };
+  }
+
+  // Push all local data to Supabase (initial seed or force push)
+  async pushAllLocalDataToCloud() {
+    const settings = await this.getSettings();
+    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
+      return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
+    }
+
+    supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
+    const isConn = await supabaseService.testConnection();
+    if (!isConn) {
+      return { success: false, message: 'Could not connect to Supabase. Please verify your Project URL and Anon Key.' };
+    }
+
+    const localData = {
+      products: await this.getProducts(),
+      categories: await this.getCategories(),
+      markets: await this.getMarkets(),
+      sales: await this.getSales()
+    };
+
+    const res = await supabaseService.pushAllLocalData(localData);
+    if (!res) {
+      return { success: false, message: 'Failed to upload local data to Supabase.' };
+    }
+
+    return {
+      success: true,
+      message: `Successfully uploaded ${localData.products.length} products, ${localData.categories.length} categories, ${localData.markets.length} markets, and ${localData.sales.length} sales to Supabase cloud!`
+    };
+  }
+
   async exportFullBackup() {
     const products = await this.getProducts();
     const categories = await this.getCategories();
