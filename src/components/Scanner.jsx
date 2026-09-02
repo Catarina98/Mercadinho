@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, CameraOff, Flashlight, RefreshCw, Barcode, CheckCircle, AlertCircle } from 'lucide-react';
-import { audioService } from '../utils/audio';
 
 export default function Scanner({ onScanSuccess, onScanError, isScannerActive, setIsScannerActive }) {
   const [scannerStarted, setScannerStarted] = useState(false);
@@ -123,9 +122,6 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
             if (!isMountedRef.current) return;
 
             setLastScannedCode(decodedText);
-            
-            // Audio & Haptic feedback
-            audioService.playScanBeep();
 
             // Visual feedback banner
             setScanFeedback({ success: true, text: decodedText });
@@ -215,7 +211,6 @@ export default function Scanner({ onScanSuccess, onScanError, isScannerActive, s
     e.preventDefault();
     if (!manualCode.trim()) return;
 
-    audioService.playScanBeep();
     setLastScannedCode(manualCode.trim());
     setScanFeedback({ success: true, text: manualCode.trim() });
     setTimeout(() => {

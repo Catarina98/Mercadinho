@@ -65,18 +65,39 @@ class SupabaseService {
     this.url = '';
     this.anonKey = '';
     this.isConnected = false;
+
+    // Check for environment variables if available
+    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
+    const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
+    if (envUrl && envKey) {
+      this.init(envUrl, envKey);
+    }
+  }
+
+  isConfigured() {
+    return Boolean(this.url && this.anonKey && this.client);
   }
 
   init(url, anonKey) {
     if (!url || !anonKey) {
       this.client = null;
+      this.url = '';
+      this.anonKey = '';
       this.isConnected = false;
       return null;
     }
 
     try {
-      this.url = url.trim();
-      this.anonKey = anonKey.trim();
+      const cleanUrl = url.trim();
+      const cleanKey = anonKey.trim();
+
+      // Avoid re-creating client if already initialized with the exact same credentials
+      if (this.client && this.url === cleanUrl && this.anonKey === cleanKey) {
+        return this.client;
+      }
+
+      this.url = cleanUrl;
+      this.anonKey = cleanKey;
       this.client = createClient(this.url, this.anonKey);
       return this.client;
     } catch (e) {
@@ -90,7 +111,7 @@ class SupabaseService {
   async testConnection() {
     if (!this.client) return false;
     try {
-      const { data, error } = await this.client.from('products').select('id').limit(1);
+      const { error } = await this.client.from('products').select('id').limit(1);
       if (error) {
         console.warn('Supabase test connection error:', error);
         this.isConnected = false;
@@ -130,13 +151,13 @@ class SupabaseService {
       const sales = (salesRes.data || []).map(s => ({
         id: s.id,
         timestamp: s.timestamp,
-        dateStr: s.date_str,
-        market: s.market,
-        items: s.items || [],
+        dateStr: s.date_str || (s.timestamp ? s.timestamp.split('T')[0] : new Date().toISOString().split('T')[0]),
+        market: s.market || '',
+        items: Array.isArray(s.items) ? s.items : [],
         subtotal: Number(s.subtotal || 0),
         discount: Number(s.discount || 0),
         total: Number(s.total || 0),
-        paymentMethod: s.payment_method,
+        paymentMethod: s.payment_method || 'cash',
         amountReceived: Number(s.amount_received || 0),
         change: Number(s.change || 0),
         notes: s.notes || ''

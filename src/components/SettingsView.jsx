@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { Settings, MapPin, Plus, Trash2, Volume2, VolumeX, Smartphone, DollarSign, Database, Download, Upload, RefreshCcw, Check, Store, Cloud, CloudOff, RefreshCw, Copy, CheckCheck, ExternalLink, ShieldCheck, Layers } from 'lucide-react';
+import { Settings, MapPin, Plus, Trash2, Smartphone, DollarSign, Database, Download, Upload, RefreshCcw, Check, Store, Cloud, CloudOff, RefreshCw, Copy, CheckCheck, ExternalLink, ShieldCheck, Layers } from 'lucide-react';
 import { downloadJSON } from '../utils/exportUtils';
-import { audioService } from '../utils/audio';
 import { SUPABASE_SQL_SCHEMA, supabaseService } from '../db/supabase';
 import { db } from '../db/storage';
 
@@ -9,6 +8,8 @@ export default function SettingsView({
   settings,
   markets,
   activeMarket,
+  cloudSyncStatus,
+  cloudSyncMessage,
   onSaveSettings,
   onSaveMarket,
   onDeleteMarket,
@@ -16,13 +17,17 @@ export default function SettingsView({
   onExportBackup,
   onImportBackup,
   onResetDemoData,
-  onRefreshAllData
+  onRefreshAllData,
+  onTriggerCloudSync
 }) {
-  const [storeName, setStoreName] = useState(settings?.storeName || 'O Meu Mercadinho');
+  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
+  const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
+
+  const [storeName, setStoreName] = useState(settings?.storeName || 'Fiordaria');
   const [currencySymbol, setCurrencySymbol] = useState(settings?.currencySymbol || '€');
-  const [soundEnabled, setSoundEnabled] = useState(settings?.soundEnabled !== false);
-  const [supabaseUrl, setSupabaseUrl] = useState(settings?.supabaseUrl || '');
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState(settings?.supabaseAnonKey || '');
+  const [autoSyncOnStartup, setAutoSyncOnStartup] = useState(settings?.autoSyncOnStartup !== false);
+  const [supabaseUrl, setSupabaseUrl] = useState(settings?.supabaseUrl || envUrl || '');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState(settings?.supabaseAnonKey || envKey || '');
 
   const [newMarketName, setNewMarketName] = useState('');
   const [newMarketCity, setNewMarketCity] = useState('');
@@ -37,11 +42,10 @@ export default function SettingsView({
       ...settings,
       storeName,
       currencySymbol,
-      soundEnabled,
+      autoSyncOnStartup,
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim()
     });
-    audioService.toggleSound(soundEnabled);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
   };
@@ -54,16 +58,27 @@ export default function SettingsView({
     // Save settings first
     await onSaveSettings({
       ...settings,
+      autoSyncOnStartup,
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim()
     });
 
-    const res = await db.syncWithCloud();
-    if (res.success) {
-      setSyncStatus({ type: 'success', message: res.message });
-      if (onRefreshAllData) onRefreshAllData();
+    if (onTriggerCloudSync) {
+      const res = await onTriggerCloudSync();
+      if (res?.success) {
+        setSyncStatus({ type: 'success', message: res.message || 'Synchronized with cloud database!' });
+        if (onRefreshAllData) onRefreshAllData();
+      } else {
+        setSyncStatus({ type: 'error', message: res?.message || 'Failed to sync with Supabase.' });
+      }
     } else {
-      setSyncStatus({ type: 'error', message: res.message });
+      const res = await db.syncWithCloud();
+      if (res.success) {
+        setSyncStatus({ type: 'success', message: res.message });
+        if (onRefreshAllData) onRefreshAllData();
+      } else {
+        setSyncStatus({ type: 'error', message: res.message });
+      }
     }
   };
 
@@ -216,21 +231,6 @@ export default function SettingsView({
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
-                <input
-                  type="checkbox"
-                  checked={soundEnabled}
-                  onChange={(e) => setSoundEnabled(e.target.checked)}
-                  style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }}
-                />
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  {soundEnabled ? <Volume2 size={16} color="var(--primary)" /> : <VolumeX size={16} />}
-                  Audio Feedback (Scan Beeps & Chimes)
-                </span>
-              </label>
-            </div>
-
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="submit" className="btn btn-primary">
                 {saveSuccess ? <><Check size={16} /> Preferences Saved</> : 'Save Preferences'}
@@ -260,7 +260,7 @@ export default function SettingsView({
           </div>
 
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            Connect a free Supabase database to automatically synchronize products, barcodes, and sales history between your <strong>Desktop computer</strong> and <strong>Mobile phone</strong>.
+            Connect a free Supabase database to automatically synchronize products, barcodes, and sales history between all your devices. When you open Mercadinho POS with an internet connection, <strong>all catalog items and sales are automatically loaded from your cloud database</strong>.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.25rem' }}>
@@ -275,6 +275,11 @@ export default function SettingsView({
                 value={supabaseUrl}
                 onChange={(e) => setSupabaseUrl(e.target.value)}
               />
+              {envUrl && supabaseUrl === envUrl && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.3rem' }}>
+                  <ShieldCheck size={13} /> Loaded from .env environment variable (VITE_SUPABASE_URL)
+                </div>
+              )}
             </div>
 
             <div>
@@ -288,6 +293,11 @@ export default function SettingsView({
                 value={supabaseAnonKey}
                 onChange={(e) => setSupabaseAnonKey(e.target.value)}
               />
+              {envKey && supabaseAnonKey === envKey && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.3rem' }}>
+                  <ShieldCheck size={13} /> Loaded from .env environment variable (VITE_SUPABASE_ANON_KEY)
+                </div>
+              )}
             </div>
           </div>
 

@@ -22,9 +22,10 @@ const DEFAULT_SETTINGS = {
   taxRate: 0,
   storeName: 'Amigurumi & Artesanato',
   theme: 'dark',
-  supabaseUrl: '',
-  supabaseAnonKey: '',
-  cloudSyncEnabled: false
+  supabaseUrl: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '',
+  supabaseAnonKey: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '',
+  cloudSyncEnabled: true,
+  autoSyncOnStartup: true
 };
 
 class PosStorage {
@@ -265,16 +266,114 @@ class PosStorage {
   }
 
   async ensureSupabase() {
-    if (supabaseService.client) return supabaseService;
+    if (supabaseService.client && supabaseService.isConfigured()) return supabaseService;
     try {
       const settings = await this.getSettings();
-      if (settings.supabaseUrl && settings.supabaseAnonKey) {
-        supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
+      const url = settings.supabaseUrl || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
+      const key = settings.supabaseAnonKey || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
+      if (url && key) {
+        supabaseService.init(url, key);
       }
     } catch (e) {
       console.warn('ensureSupabase error:', e);
     }
     return supabaseService;
+  }
+
+  /**
+   * Automatically fetch all data from Supabase on startup if online and configured.
+   * Hydrates local stores (products, categories, markets, sales) with database records.
+   */
+  async syncFromCloudOnStartup() {
+    // 1. Check network connectivity
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return {
+        success: false,
+        source: 'offline',
+        message: 'Device is offline. Loaded cached local data.'
+      };
+    }
+
+    // 2. Ensure Supabase is configured
+    await this.ensureSupabase();
+    if (!supabaseService.isConfigured()) {
+      return {
+        success: false,
+        source: 'unconfigured',
+        message: 'Supabase cloud credentials not set.'
+      };
+    }
+
+    // 3. Test connection to cloud database
+    const isConn = await supabaseService.testConnection();
+    if (!isConn) {
+      return {
+        success: false,
+        source: 'error',
+        message: 'Could not connect to Supabase. Check credentials.'
+      };
+    }
+
+    // 4. Fetch all remote records from the database
+    const remote = await supabaseService.fetchRemoteData();
+    if (!remote) {
+      return {
+        success: false,
+        source: 'error',
+        message: 'Failed to retrieve tables from Supabase.'
+      };
+    }
+
+    const { products = [], categories = [], markets = [], sales = [] } = remote;
+    const hasRemoteData = products.length > 0 || categories.length > 0 || markets.length > 0 || sales.length > 0;
+
+    if (hasRemoteData) {
+      // Overwrite local stores with remote database data
+      await this.clear('products');
+      await this.clear('categories');
+      await this.clear('markets');
+      await this.clear('sales');
+
+      for (const p of products) await this.put('products', p);
+      for (const c of categories) await this.put('categories', c);
+      for (const m of markets) await this.put('markets', m);
+      for (const s of sales) await this.put('sales', s);
+
+      if (markets.length > 0) {
+        const activeM = markets.find(m => m.active) || markets[0];
+        this.setActiveMarket(activeM);
+      }
+
+      return {
+        success: true,
+        source: 'cloud',
+        message: `Connected to Supabase. Loaded ${products.length} products, ${sales.length} sales.`,
+        counts: {
+          products: products.length,
+          categories: categories.length,
+          markets: markets.length,
+          sales: sales.length
+        }
+      };
+    } else {
+      // Remote database is completely empty; seed initial local records to cloud
+      const localData = {
+        products: await this.getProducts(),
+        categories: await this.getCategories(),
+        markets: await this.getMarkets(),
+        sales: await this.getSales()
+      };
+
+      if (localData.products.length > 0 || localData.categories.length > 0) {
+        await supabaseService.pushAllLocalData(localData);
+      }
+
+      return {
+        success: true,
+        source: 'cloud_initialized',
+        message: 'Connected to empty cloud database. Local catalog synchronized.'
+      };
+    }
   }
 
   async saveProduct(product) {
@@ -412,11 +511,6 @@ class PosStorage {
     }
 
     return sale;
-  }
-
-  async deleteSale(id) {
-    supabaseService.deleteSale(id);
-    return await this.delete('sales', id);
   }
 
   async getSettings() {

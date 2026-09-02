@@ -1,45 +1,73 @@
 import React from 'react';
-import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Volume2, VolumeX, Store } from 'lucide-react';
-import { audioService } from '../utils/audio';
+import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 
 export default function Navbar({
   activeTab,
   setActiveTab,
   activeMarket,
   onOpenMarketModal,
-  soundEnabled,
-  onToggleSound,
-  cartCount = 0
+  cartCount = 0,
+  cloudSyncStatus = 'synced',
+  cloudSyncMessage = '',
+  onTriggerCloudSync
 }) {
   return (
     <>
       <nav className="navbar no-print">
         <div className="navbar-inner">
-          {/* Logo Group */}
-          <div className="logo-group" onClick={() => setActiveTab('pos')}>
-            <div className="logo-icon">
-              <ShoppingBag size={22} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span className="logo-title">Mercadinho</span>
-                <span className="logo-badge">POS</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Active Market Location Pill */}
+          {/* Brand Logo Button */}
           <button
-            className="market-pill-btn"
-            onClick={onOpenMarketModal}
-            title="Click to change active selling market / location"
+            className="logo-btn"
+            onClick={() => setActiveTab('pos')}
+            title="Fiordaria POS - Go to POS"
+            aria-label="Fiordaria POS"
           >
-            <span className="market-pill-dot" />
-            <MapPin size={14} color="var(--primary)" />
-            <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeMarket ? activeMarket.name : 'Select Market'}
-            </span>
+            <img src="/logo.png" alt="Fiordaria Logo" className="logo-img" />
           </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            {/* Active Market Location Pill */}
+            <button
+              className="market-pill-btn"
+              onClick={onOpenMarketModal}
+              title="Click to change active selling market / location"
+            >
+              <span className="market-pill-dot" />
+              <MapPin size={14} color="var(--primary)" />
+              <span className="market-pill-text">
+                {activeMarket ? activeMarket.name : 'Select Market'}
+              </span>
+            </button>
+
+            {/* Cloud Database Sync Pill */}
+            <button
+              className={`cloud-pill-btn status-${cloudSyncStatus || 'offline'}`}
+              onClick={() => {
+                if (cloudSyncStatus === 'unconfigured') {
+                  setActiveTab('settings');
+                } else if (onTriggerCloudSync) {
+                  onTriggerCloudSync();
+                }
+              }}
+              title={cloudSyncMessage || (cloudSyncStatus === 'synced' ? 'Database Connected & Synced (Click to refresh)' : 'Click to sync with database')}
+            >
+              <span className={`cloud-pill-dot status-${cloudSyncStatus || 'offline'}`} />
+              {cloudSyncStatus === 'syncing' ? (
+                <RefreshCw size={13} className="spin-animation" />
+              ) : cloudSyncStatus === 'offline' ? (
+                <CloudOff size={13} />
+              ) : (
+                <Cloud size={13} />
+              )}
+              <span className="cloud-pill-text">
+                {cloudSyncStatus === 'syncing' && 'Syncing'}
+                {cloudSyncStatus === 'synced' && 'Cloud DB'}
+                {cloudSyncStatus === 'offline' && 'Offline'}
+                {cloudSyncStatus === 'unconfigured' && 'Setup DB'}
+                {cloudSyncStatus === 'error' && 'Sync Retry'}
+              </span>
+            </button>
+          </div>
 
           {/* Desktop Navigation Tabs */}
           <div className="nav-tabs">
@@ -95,15 +123,6 @@ export default function Navbar({
               <span>Settings</span>
             </button>
           </div>
-
-          {/* Audio Mute / Sound Toggle */}
-          <button
-            className="btn btn-secondary btn-icon"
-            onClick={onToggleSound}
-            title={soundEnabled ? 'Disable Scan Sound' : 'Enable Scan Sound'}
-          >
-            {soundEnabled ? <Volume2 size={18} color="var(--primary)" /> : <VolumeX size={18} color="var(--text-muted)" />}
-          </button>
         </div>
       </nav>
 

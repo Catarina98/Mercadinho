@@ -4,7 +4,6 @@ import Scanner from './Scanner';
 import QuantityKeypadModal from './QuantityKeypadModal';
 import CheckoutModal from './CheckoutModal';
 import ReceiptModal from './ReceiptModal';
-import { audioService } from '../utils/audio';
 
 export default function PosView({
   products = [],
@@ -34,7 +33,6 @@ export default function PosView({
     const maxStock = typeof product.stock === 'number' ? product.stock : 999;
 
     if (maxStock <= 0) {
-      audioService.playErrorBuzz();
       setStockWarning(`"${product.name}" is out of stock (0 items available).`);
       setTimeout(() => setStockWarning(null), 4500);
       return;
@@ -44,7 +42,6 @@ export default function PosView({
     const currentQtyInCart = existingItem ? existingItem.quantity : 0;
 
     if (currentQtyInCart + qty > maxStock) {
-      audioService.playErrorBuzz();
       setStockWarning(`Cannot add more "${product.name}". Only ${maxStock} in stock (${currentQtyInCart} already in cart).`);
       setTimeout(() => setStockWarning(null), 4500);
 
@@ -54,7 +51,6 @@ export default function PosView({
       return;
     }
 
-    audioService.playScanBeep();
     setCart((prev) => {
       const existingIndex = prev.findIndex(item => item.id === product.id || (item.code && item.code === product.code));
       if (existingIndex >= 0) {
@@ -71,7 +67,7 @@ export default function PosView({
             id: product.id,
             code: product.code || '',
             name: product.name,
-            price: Number(product.price),
+            price: Number(product.price || 0),
             category: product.category || 'General',
             color: product.color || '#6366f1',
             quantity: qty,
@@ -92,7 +88,6 @@ export default function PosView({
     if (product) {
       const maxStock = typeof product.stock === 'number' ? product.stock : 999;
       if (maxStock <= 0) {
-        audioService.playErrorBuzz();
         setStockWarning(`"${product.name}" is out of stock (0 items available).`);
         setTimeout(() => setStockWarning(null), 4500);
         return;
@@ -101,7 +96,6 @@ export default function PosView({
       addToCart(product, 1);
       setNotFoundCode(null);
     } else {
-      audioService.playErrorBuzz();
       setNotFoundCode(code);
       setTimeout(() => setNotFoundCode(null), 5000);
     }
@@ -118,7 +112,6 @@ export default function PosView({
     const maxStock = origProduct && typeof origProduct.stock === 'number' ? origProduct.stock : 999;
 
     if (newQty > maxStock) {
-      audioService.playErrorBuzz();
       setStockWarning(`Cannot increase quantity for "${origProduct?.name || 'Item'}". Only ${maxStock} in stock.`);
       setTimeout(() => setStockWarning(null), 4500);
       newQty = maxStock;

@@ -7,7 +7,6 @@ import CatalogView from './components/CatalogView';
 import SettingsView from './components/SettingsView';
 import MarketSelectorModal from './components/MarketSelectorModal';
 import { db } from './db/storage';
-import { audioService } from './utils/audio';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos' | 'analytics' | 'sales' | 'catalog' | 'settings'
@@ -17,50 +16,13 @@ export default function App() {
   const [activeMarket, setActiveMarket] = useState(null);
   const [sales, setSales] = useState([]);
   const [settings, setSettings] = useState(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
   const [isMarketModalOpen, setIsMarketModalOpen] = useState(false);
   const [editingProductInitial, setEditingProductInitial] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Load initial data from DB
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [loadedProds, loadedCats, loadedMkts, loadedSales, loadedSettings] = await Promise.all([
-          db.getProducts(),
-          db.getCategories(),
-          db.getMarkets(),
-          db.getSales(),
-          db.getSettings()
-        ]);
-
-        setProducts(loadedProds);
-        setCategories(loadedCats);
-        setMarkets(loadedMkts);
-        setSales(loadedSales);
-        setSettings(loadedSettings);
-
-        const currentMkt = db.getActiveMarket() || loadedMkts[0] || null;
-        setActiveMarket(currentMkt);
-
-        if (loadedSettings) {
-          setSoundEnabled(loadedSettings.soundEnabled !== false);
-          audioService.toggleSound(loadedSettings.soundEnabled !== false);
-          if (loadedSettings.supabaseUrl && loadedSettings.supabaseAnonKey) {
-            import('./db/supabase').then(({ supabaseService }) => {
-              supabaseService.init(loadedSettings.supabaseUrl, loadedSettings.supabaseAnonKey);
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Error loading data from database:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadData();
-  }, []);
+  
+  // Cloud sync status state: 'syncing' | 'synced' | 'offline' | 'unconfigured' | 'error'
+  const [cloudSyncStatus, setCloudSyncStatus] = useState('syncing');
+  const [cloudSyncMessage, setCloudSyncMessage] = useState('');
 
   const refreshAllData = async () => {
     const [loadedProds, loadedCats, loadedMkts, loadedSales, loadedSettings] = await Promise.all([
@@ -76,7 +38,94 @@ export default function App() {
     setSales(loadedSales);
     setSettings(loadedSettings);
     setActiveMarket(db.getActiveMarket() || loadedMkts[0] || null);
+    return { loadedProds, loadedCats, loadedMkts, loadedSales, loadedSettings };
   };
+
+  const triggerCloudSync = async (notify = false) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudSyncStatus('offline');
+      setCloudSyncMessage('Offline - local storage mode');
+      return { success: false, reason: 'offline' };
+    }
+
+    setCloudSyncStatus('syncing');
+    setCloudSyncMessage('Syncing with database...');
+
+    try {
+      const syncResult = await db.syncFromCloudOnStartup();
+
+      if (syncResult.success) {
+        setCloudSyncStatus('synced');
+        setCloudSyncMessage(syncResult.message || 'Synced with cloud database');
+        await refreshAllData();
+      } else if (syncResult.source === 'offline') {
+        setCloudSyncStatus('offline');
+        setCloudSyncMessage('Offline - working with local data');
+      } else if (syncResult.source === 'unconfigured') {
+        setCloudSyncStatus('unconfigured');
+        setCloudSyncMessage('Cloud sync not configured');
+      } else {
+        setCloudSyncStatus('error');
+        setCloudSyncMessage(syncResult.message || 'Error connecting to database');
+      }
+
+      return syncResult;
+    } catch (err) {
+      console.warn('Auto cloud sync failed:', err);
+      setCloudSyncStatus('error');
+      setCloudSyncMessage('Cloud sync error');
+      return { success: false, error: err };
+    }
+  };
+
+  // Initial load: fast local paint, then automatic cloud database hydration if online
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initialStartup() {
+      try {
+        // 1. Instant local load from IndexedDB
+        await refreshAllData();
+
+        if (isMounted) {
+          setIsLoading(false);
+        }
+
+        // 2. Hydrate from cloud database if online
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          await triggerCloudSync();
+        } else {
+          setCloudSyncStatus('offline');
+          setCloudSyncMessage('Offline - local storage mode');
+        }
+      } catch (err) {
+        console.error('Error during initial startup:', err);
+        if (isMounted) setIsLoading(false);
+      }
+    }
+
+    initialStartup();
+
+    // 3. Network status event listeners for live re-sync on reconnect
+    const handleOnline = () => {
+      console.log('Internet connected. Syncing with database...');
+      triggerCloudSync(true);
+    };
+
+    const handleOffline = () => {
+      setCloudSyncStatus('offline');
+      setCloudSyncMessage('Offline - working with local data');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Handlers for Market Locations
   const handleSelectMarket = (mkt) => {
@@ -150,19 +199,10 @@ export default function App() {
     setSales(updatedSales);
   };
 
-  // Handlers for Settings & Sound
+  // Handlers for Settings
   const handleSaveSettings = async (newSettings) => {
     const saved = await db.saveSettings(newSettings);
     setSettings(saved);
-  };
-
-  const handleToggleSound = () => {
-    const nextState = !soundEnabled;
-    setSoundEnabled(nextState);
-    audioService.toggleSound(nextState);
-    if (settings) {
-      handleSaveSettings({ ...settings, soundEnabled: nextState });
-    }
   };
 
   // Handlers for Backup & Restore
@@ -241,8 +281,9 @@ export default function App() {
         setActiveTab={setActiveTab}
         activeMarket={activeMarket}
         onOpenMarketModal={() => setIsMarketModalOpen(true)}
-        soundEnabled={soundEnabled}
-        onToggleSound={handleToggleSound}
+        cloudSyncStatus={cloudSyncStatus}
+        cloudSyncMessage={cloudSyncMessage}
+        onTriggerCloudSync={() => triggerCloudSync(true)}
       />
 
       {/* Main Content Area */}
@@ -299,6 +340,8 @@ export default function App() {
             settings={settings}
             markets={markets}
             activeMarket={activeMarket}
+            cloudSyncStatus={cloudSyncStatus}
+            cloudSyncMessage={cloudSyncMessage}
             onSaveSettings={handleSaveSettings}
             onSaveMarket={handleAddMarket}
             onDeleteMarket={handleDeleteMarket}
@@ -307,6 +350,7 @@ export default function App() {
             onImportBackup={handleImportBackup}
             onResetDemoData={handleResetDemoData}
             onRefreshAllData={refreshAllData}
+            onTriggerCloudSync={() => triggerCloudSync(true)}
           />
         )}
       </main>

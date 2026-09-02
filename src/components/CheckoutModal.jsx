@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, CreditCard, Banknote, Smartphone, CheckCircle, Percent, ArrowRight, MapPin } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { audioService } from '../utils/audio';
 
 export default function CheckoutModal({
   isOpen,
@@ -57,8 +56,7 @@ export default function CheckoutModal({
 
     setIsProcessing(true);
 
-    // Trigger celebration sounds & confetti
-    audioService.playSuccessChime();
+    // Trigger celebratory confetti
     try {
       confetti({
         particleCount: 80,
