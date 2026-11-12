@@ -206,9 +206,16 @@ class PosStorage {
     return this.catalogSalesSync;
   }
 
-  async removeWallapopLink(product) {
+  async prepareWallapopListing(product) {
     requireOnline();
-    const result = await supabaseService.removeWallapopLink(product);
+    return supabaseService.wallapopListing({ action: 'prepare', productId: product.id });
+  }
+
+  async updateWallapopLink(product, url) {
+    requireOnline();
+    const result = await supabaseService.wallapopListing(url
+      ? { action: 'associate', productId: product.id, url }
+      : { productId: product.id, expectedUrl: product.wallapop_url });
     const cached = await this.get('products', product.id);
     if (cached) await this.put('products', { ...cached, wallapop_url: result.wallapopUrl });
     return result;

@@ -68,13 +68,11 @@ class SupabaseService {
     return data === true;
   }
 
-  async removeWallapopLink(product) {
-    const { data, error } = await this.client.functions.invoke('remove-wallapop-link', {
-      body: { productId: product.id, expectedUrl: product.wallapop_url }
-    });
+  async wallapopListing(body) {
+    const { data, error } = await this.client.functions.invoke('remove-wallapop-link', { body });
     if (error) {
       const details = await error.context?.json?.().catch(() => null);
-      throw new Error(details?.error || 'Não foi possível confirmar a remoção do link. Tenta novamente.');
+      throw new Error(details?.error || 'Não foi possível concluir o pedido. Tenta novamente.');
     }
     return data;
   }

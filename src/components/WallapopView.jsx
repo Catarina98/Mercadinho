@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ExternalLink, RefreshCw, Store, Unlink } from 'lucide-react';
+import WallapopPublishing from './WallapopPublishing';
 import '../styles/wallapop.css';
 
 function StockForm({ product, onSave, onReport }) {
@@ -77,7 +78,7 @@ function storefrontLink(product) {
   return url.href;
 }
 
-function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSelectProduct }) {
+function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSelectProduct, onPrepare, onAssociate }) {
   return (
     <section className="glass-card wallapop-section">
       <h2>{title} ({products.length})</h2>
@@ -86,7 +87,7 @@ function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSele
           {products.map(product => {
             const productUrl = storefrontLink(product);
             return (
-              <li key={product.id} className="wallapop-task">
+              <li key={product.id} className={onRemoveLink ? 'wallapop-task' : 'wallapop-task wallapop-publish-row'}>
                 <div>
                   <strong>{product.name}</strong>
                   <p>{product.stock} un. em stock</p>
@@ -109,12 +110,14 @@ function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSele
                   <button className="btn btn-secondary" onClick={() => onSelectProduct(product.id)}>
                     Editar stock
                   </button>
-                  {onRemoveLink && (
+                  {onRemoveLink ? (
                     <button className="btn btn-secondary wallapop-unlink" disabled={Boolean(removingId)}
                       onClick={() => onRemoveLink(product)}>
                       <Unlink size={14} />
                       {removingId === product.id ? 'A remover link…' : 'Remover link Wallapop'}
                     </button>
+                  ) : (
+                    <WallapopPublishing product={product} onPrepare={onPrepare} onAssociate={onAssociate} />
                   )}
                 </div>
               </li>
@@ -127,7 +130,7 @@ function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSele
 }
 
 export default function WallapopView({
-  products, stockProductId, onSelectProduct, onSaveStock, onLinkInventory, onRemoveLink, onRefresh, pendingSales
+  products, stockProductId, onSelectProduct, onSaveStock, onLinkInventory, onRemoveLink, onRefresh, onPrepareListing, onAssociateLink, pendingSales
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -166,6 +169,12 @@ export default function WallapopView({
     }
   }
 
+  async function associateLink(product, url) {
+    const result = await onAssociateLink(product, url);
+    const status = result.synced ? 'Link associado à ficha do site.' : 'Link associado no Sanity. A lista ainda está a sincronizar.';
+    setMessage(status + (result.draftConflict ? ' Há um rascunho diferente no Sanity que ficou por alterar.' : ''));
+  }
+
   return (
     <div className="wallapop-view">
       <div className="wallapop-heading">
@@ -174,7 +183,7 @@ export default function WallapopView({
           <RefreshCw size={16} /> Atualizar
         </button>
       </div>
-      <p>Depois de retirares um anúncio na Wallapop, remove o link nesta lista. Para novos anúncios, cola o link na ficha no Sanity.</p>
+      <p>Prepara os novos anúncios nesta lista. Depois de publicares ou retirares um anúncio na Wallapop, atualiza o link aqui.</p>
       {message && <p role="status">{message}</p>}
       {pendingSales > 0 && <p role="status">Vendas por sincronizar: {pendingSales}. Carrega em Atualizar quando tiveres rede.</p>}
 
@@ -206,7 +215,7 @@ export default function WallapopView({
 
       <ListingTasks title="Retirar da Wallapop" products={remove} onRemoveLink={removeLink} removingId={removingId}
         empty="Não há artigos esgotados com anúncio associado." onSelectProduct={onSelectProduct} />
-      <ListingTasks title="Publicar na Wallapop" products={publish}
+      <ListingTasks title="Publicar na Wallapop" products={publish} onPrepare={onPrepareListing} onAssociate={associateLink}
         empty="Não há artigos em stock sem link da Wallapop." onSelectProduct={onSelectProduct} />
     </div>
   );

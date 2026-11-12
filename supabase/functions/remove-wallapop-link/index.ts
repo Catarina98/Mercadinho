@@ -2,10 +2,17 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { createClient as createSanityClient } from 'npm:@sanity/client@7';
 
 type Listing = { wallapopUrl?: string; vintedUrl?: string };
-type Variant = Listing & { _key: string; id: string };
-type Product = Listing & { _id: string; _rev: string; variants?: Variant[] };
+type Localized = string | { pt?: string; en?: string };
+type ListingContent = {
+  dimensions?: Localized;
+  description?: Localized;
+  image?: string;
+  images?: string[];
+};
+type Variant = Listing & ListingContent & { _key: string; id: string; name?: Localized };
+type Product = Listing & ListingContent & { _id: string; _rev: string; title?: Localized; variants?: Variant[] };
 const fields = ['wallapopUrl', 'vintedUrl'] as const;
-const query = '*[_type == "product" && _id in $ids]{_id,_rev,wallapopUrl,vintedUrl,variants[]{_key,id,wallapopUrl,vintedUrl}}';
+const query = '*[_type == "product" && _id in $ids]{_id,_rev,wallapopUrl,vintedUrl,title,description,dimensions,"images":images[].asset->url,variants[]{_key,id,name,description,dimensions,wallapopUrl,vintedUrl,"image":image.asset->url,"images":images[].asset->url}}';
 
 function wallapopUrl(value?: unknown) {
   if (typeof value !== 'string') return null;
@@ -16,6 +23,58 @@ function wallapopUrl(value?: unknown) {
   } catch {
     return null;
   }
+}
+
+function itemUrl(value?: unknown) {
+  const valid = wallapopUrl(value);
+  if (!valid) return null;
+  const url = new URL(valid);
+  if (url.port || !/^\/item\/[^/]+\/?$/.test(url.pathname)) return null;
+  url.search = '';
+  url.hash = '';
+  url.pathname = url.pathname.replace(/\/$/, '');
+  return url.href;
+}
+
+function text(value?: Localized) {
+  return (typeof value === 'string' ? value : value?.pt?.trim() || value?.en || '').trim();
+}
+
+function listingPhoto(product: Product, variant?: Variant) {
+  const sources = variant
+    ? [variant.image, ...(variant.images ?? []), ...(product.variants?.length === 1 ? product.images ?? [] : [])]
+    : product.images ?? [];
+  for (const source of sources) {
+    if (!source) continue;
+    try {
+      const url = new URL(source);
+      if (url.origin !== 'https://cdn.sanity.io' || !url.pathname.startsWith('/images/')) continue;
+      url.search = 'w=1600&h=1600&fit=max&fm=jpg&q=90';
+      url.hash = '';
+      return url.href;
+    } catch { /* Skip broken references. */ }
+  }
+  return null;
+}
+
+function prepareListing(product: Product, variantId: string, fallbackName: string) {
+  const variant = product.variants?.find(item => item.id === variantId);
+  const variantName = text(variant?.name);
+  const productTitle = text(product.title);
+  const description = text(product.description);
+  const variantDescription = text(variant?.description);
+  const dimensions = text(variant?.dimensions) || text(product.dimensions);
+  return {
+    title: productTitle && variantName && variantName !== productTitle
+      ? variantName + ' — ' + productTitle : productTitle || variantName || fallbackName,
+    description: [
+      variantName && variantName !== productTitle ? 'Peça: ' + variantName : '',
+      variantDescription && variantDescription !== description ? variantDescription : '',
+      description,
+      dimensions ? 'Tamanho: ' + dimensions : '',
+    ].filter(Boolean).join('\n\n'),
+    imageUrl: listingPhoto(product, variant),
+  };
 }
 
 class RequestError extends Error {
@@ -55,6 +114,18 @@ function pathsToRemove(product: Product, variantId: string, expectedUrl: string,
   return targetScopes(product, variantId, isDraft).flatMap(({ item, prefix }) =>
     fields.filter(field => wallapopUrl(item[field]) === expectedUrl).map(field => prefix + field),
   );
+}
+
+function associationPath(product: Product, variantId: string, url: string, isDraft: boolean) {
+  const scopes = targetScopes(product, variantId, isDraft);
+  if (!scopes.length) return { path: null, draftConflict: isDraft };
+  const effective = currentLink(product, variantId);
+  if (effective && itemUrl(effective) === url) return { path: null, draftConflict: false };
+  if (effective || scopes[0].item.wallapopUrl?.trim()) {
+    if (isDraft) return { path: null, draftConflict: true };
+    throw new RequestError(409, 'Já existe outro link na ficha. Atualiza a lista para o confirmar.');
+  }
+  return { path: scopes[0].prefix + 'wallapopUrl', draftConflict: false };
 }
 
 function corsHeaders() {
@@ -112,13 +183,17 @@ Deno.serve(async request => {
 
     const body = await request.json().catch(() => null);
     const rowId = body?.productId;
+    const action = body?.action ?? 'remove';
     const expectedUrl = wallapopUrl(body?.expectedUrl);
-    if (typeof rowId !== 'string' || !rowId || rowId.length > 512 || !expectedUrl) {
-      throw new RequestError(400, 'Não foi possível identificar o artigo e o anúncio.');
+    const newUrl = itemUrl(body?.url);
+    if (typeof rowId !== 'string' || !rowId || rowId.length > 512 || !['remove', 'prepare', 'associate'].includes(action)) {
+      throw new RequestError(400, 'Não foi possível identificar o artigo.');
     }
+    if (action === 'remove' && !expectedUrl) throw new RequestError(400, 'Não foi possível identificar o anúncio.');
+    if (action === 'associate' && !newUrl) throw new RequestError(400, 'Cola o link direto de um anúncio da Wallapop.');
 
     const { data: product, error } = await database.from('products')
-      .select('sanity_product_id,sanity_variant_id,sanity_active,stock_confirmed,stock,wallapop_url')
+      .select('sanity_product_id,sanity_variant_id,sanity_active,stock_confirmed,stock,wallapop_url,name')
       .eq('id', rowId)
       .maybeSingle();
     if (error) throw error;
@@ -126,44 +201,61 @@ Deno.serve(async request => {
     if (!documentId || !product.sanity_active || /^(drafts|versions)\./.test(documentId)) {
       throw new RequestError(404, 'Este artigo já não está no catálogo publicado.');
     }
-    if (!product.stock_confirmed || product.stock !== 0) {
+    if (!product.stock_confirmed || (action === 'remove' ? product.stock !== 0 : !(product.stock > 0))) {
       throw new RequestError(409, 'O stock do artigo mudou. Atualiza a lista antes de continuar.');
     }
-    if (product.wallapop_url && wallapopUrl(product.wallapop_url) !== expectedUrl) {
+    if (product.wallapop_url && (action === 'remove'
+      ? wallapopUrl(product.wallapop_url) !== expectedUrl
+      : action === 'prepare' || itemUrl(product.wallapop_url) !== newUrl)) {
       throw new RequestError(409, 'O link do anúncio mudou. Atualiza a lista antes de continuar.');
     }
 
-    const token = Deno.env.get('SANITY_WALLAPOP_WRITE_TOKEN');
-    if (!token) throw new RequestError(503, 'A remoção automática ainda não está configurada.');
+    const token = action === 'prepare' ? Deno.env.get('SANITY_READ_TOKEN') : Deno.env.get('SANITY_WALLAPOP_WRITE_TOKEN');
+    if (action !== 'prepare' && !token) throw new RequestError(503, 'A atualização automática ainda não está configurada.');
     const sanity = createSanityClient({
       projectId: Deno.env.get('SANITY_PROJECT_ID'),
       dataset: Deno.env.get('SANITY_DATASET') || 'production',
       apiVersion: '2025-02-19',
-      perspective: 'raw',
+      perspective: action === 'prepare' ? 'published' : 'raw',
       useCdn: false,
       timeout: 6000,
       maxRetries: 0,
       token,
     });
     const draftId = 'drafts.' + documentId;
-    const ids = [documentId, draftId];
+    const ids = action === 'prepare' ? [documentId] : [documentId, draftId];
     const documents = await sanity.fetch<Product[]>(query, { ids });
     const published = documents.find(doc => doc._id === documentId);
     if (!published) throw new RequestError(404, 'A ficha já não está publicada no Sanity.');
     const variantId = product.sanity_variant_id;
     const existing = currentLink(published, variantId);
-    if (existing && existing !== expectedUrl) {
+    if (action === 'prepare') {
+      if (existing) throw new RequestError(409, 'Este artigo já tem um anúncio. Atualiza a lista.');
+      return json(prepareListing(published, variantId, product.name));
+    }
+    if (action === 'remove' && existing && existing !== expectedUrl) {
       throw new RequestError(409, 'O link no Sanity mudou. Atualiza a lista antes de continuar.');
     }
 
     const transaction = sanity.transaction();
     let pending = false;
+    let draftConflict = false;
     for (const document of documents) {
       if (!ids.includes(document._id)) continue;
-      const paths = pathsToRemove(document, variantId, expectedUrl, document._id === draftId);
-      if (!paths.length) continue;
-      pending = true;
-      transaction.patch(document._id, patch => patch.ifRevisionId(document._rev).unset(paths));
+      const isDraft = document._id === draftId;
+      if (action === 'associate' && newUrl) {
+        const plan = associationPath(document, variantId, newUrl, isDraft);
+        draftConflict ||= plan.draftConflict;
+        if (!plan.path) continue;
+        const path = plan.path;
+        pending = true;
+        transaction.patch(document._id, patch => patch.ifRevisionId(document._rev).set({ [path]: newUrl }));
+      } else if (expectedUrl) {
+        const paths = pathsToRemove(document, variantId, expectedUrl, isDraft);
+        if (!paths.length) continue;
+        pending = true;
+        transaction.patch(document._id, patch => patch.ifRevisionId(document._rev).unset(paths));
+      }
     }
     if (pending) {
       try {
@@ -180,10 +272,14 @@ Deno.serve(async request => {
     // list can be updated immediately, including on a retry after a lost response.
     const [current] = await sanity.fetch<Product[]>(query, { ids: [documentId] });
     const synced = await syncCatalog(projectUrl, anonKey, documentId);
-    return json({ wallapopUrl: current ? currentLink(current, variantId) : null, synced });
+    const finalUrl = current ? currentLink(current, variantId) : null;
+    if (action === 'associate' && (!finalUrl || itemUrl(finalUrl) !== newUrl)) {
+      throw new RequestError(409, 'O link mudou entretanto. Atualiza a lista antes de continuar.');
+    }
+    return json({ wallapopUrl: finalUrl, synced, ...(draftConflict && { draftConflict }) });
   } catch (error) {
     if (error instanceof RequestError) return json({ error: error.message }, error.status);
-    console.error('Wallapop link removal failed');
-    return json({ error: 'Não foi possível confirmar a remoção do link. Tenta novamente.' }, 503);
+    console.error('Wallapop listing request failed');
+    return json({ error: 'Não foi possível concluir o pedido. Tenta novamente.' }, 503);
   }
 });
