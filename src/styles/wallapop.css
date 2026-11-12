@@ -43,7 +43,7 @@
 
 .wallapop-task {
   padding: 0.75rem 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .wallapop-actions,
@@ -57,4 +57,42 @@
 
 .wallapop-unlink {
   color: var(--danger);
+}
+
+.wallapop-publishing {
+  display: contents;
+}
+
+.wallapop-publish-row:has(.wallapop-publishing-panel) > .wallapop-actions {
+  flex: 1 1 36rem;
+}
+
+.wallapop-publishing-panel {
+  display: grid;
+  flex-basis: 100%;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.wallapop-copy-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.5rem;
+}
+
+.wallapop-copy-field textarea {
+  resize: vertical;
+}
+
+@media (max-width: 560px) {
+  .wallapop-copy-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wallapop-copy-field button {
+    justify-self: start;
+  }
 }

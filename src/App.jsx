@@ -140,6 +140,14 @@ export default function App() {
     }
   };
 
+  const updateWallapopLink = async (product, url) => {
+    const result = await db.updateWallapopLink(product, url);
+    setProducts(previous => previous.map(item => item.id === product.id
+      ? { ...item, wallapop_url: result.wallapopUrl }
+      : item));
+    return result;
+  };
+
   const signOut = async () => {
     await supabaseService.signOut();
     setActiveTab('pos');
@@ -352,13 +360,9 @@ export default function App() {
                   stockProductId={stockProductId}
                   onSelectProduct={setStockProductId}
                   onRefresh={triggerCloudSync}
-                  onRemoveLink={async product => {
-                    const result = await db.removeWallapopLink(product);
-                    setProducts(previous => previous.map(item => item.id === product.id
-                      ? { ...item, wallapop_url: result.wallapopUrl }
-                      : item));
-                    return result;
-                  }}
+                  onRemoveLink={updateWallapopLink}
+                  onPrepareListing={product => db.prepareWallapopListing(product)}
+                  onAssociateLink={updateWallapopLink}
                   pendingSales={db.getPendingCatalogSales().length}
                   onLinkInventory={async (imported, existingId) => {
                     const linked = await db.linkCatalogInventory(imported, existingId);

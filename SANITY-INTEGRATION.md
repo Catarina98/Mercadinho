@@ -16,9 +16,9 @@ O Sanity mantém as fichas e os links dos anúncios. O Mercadinho guarda o stock
 6. Para importar as fichas já publicadas, faz um POST autenticado com os mesmos cabeçalhos e o corpo `{"all":true}`. Pode ser feito na ferramenta **Test** da Edge Function no painel do Supabase. O resultado indica quantas fichas processou.
 7. No repositório do Fios da Ria, configura as variáveis do GitHub Actions `NEXT_PUBLIC_MERCADINHO_SUPABASE_URL` e `NEXT_PUBLIC_MERCADINHO_SUPABASE_PUBLISHABLE_KEY`. Usa exclusivamente a chave pública do Supabase. Publica a versão do site com esta integração.
 
-### Remover links da Wallapop pelo Mercadinho
+### Gerir anúncios da Wallapop pelo Mercadinho
 
-Publica a função com `supabase functions deploy remove-wallapop-link --project-ref PROJETO`. Define o segredo `SANITY_WALLAPOP_WRITE_TOKEN` no Supabase com um token de escrita dedicado ao projeto Sanity. A função verifica a sessão e as permissões do operador, o stock e o link atual antes de remover os campos correspondentes. O token fica apenas no servidor. Se o Mercadinho for publicado noutro domínio, define `MERCADINHO_ORIGIN` com a origem desse domínio.
+Publica a função com `supabase functions deploy remove-wallapop-link --project-ref PROJETO`. Define o segredo `SANITY_WALLAPOP_WRITE_TOKEN` no Supabase com um token de escrita dedicado ao projeto Sanity. A função verifica a sessão e as permissões do operador, o stock e o link atual antes de associar ou remover um link. O token fica apenas no servidor. Se o Mercadinho for publicado noutro domínio, define `MERCADINHO_ORIGIN` com a origem desse domínio.
 
 ## Trabalho diário
 
@@ -26,7 +26,7 @@ Publica a função com `supabase functions deploy remove-wallapop-link --project
 - Nos artigos novos, confirma a quantidade. Se já tens o artigo no Mercadinho, usa **Já tenho este artigo no Mercadinho** para manter o registo, o stock e o código que já tinhas.
 - Regista as vendas no POS. A última unidade retira o botão de compra quando a página consulta o stock. O Mercadinho requer internet e confirma cada venda na base de dados antes de emitir o recibo.
 - Em **Retirar da Wallapop**, abre o anúncio e retira-o manualmente. Depois usa **Remover link Wallapop**. **Ver no site** abre a ficha e seleciona a variante.
-- Em **Publicar na Wallapop**, publica manualmente e cola o link no produto ou variante do Sanity. Os artigos sem ficha no Sanity continuam disponíveis no Mercadinho.
+- Em **Publicar na Wallapop**, usa **Preparar anúncio** para descarregar a fotografia e copiar o título e a descrição. Publica na Wallapop e usa **Associar link** para guardar o URL na ficha ou variante do Sanity. Os artigos sem ficha no Sanity continuam disponíveis no Mercadinho.
 - Uma página nova do Fios da Ria continua a precisar da publicação normal do GitHub Pages. As mudanças de stock das páginas que já existem são lidas quando abres a página.
 
 [Webhooks no Sanity](https://www.sanity.io/docs/content-lake/webhooks) · [Funções no Supabase](https://supabase.com/docs/guides/functions/deploy) · [Permissões das tabelas](https://supabase.com/docs/guides/database/postgres/row-level-security)
