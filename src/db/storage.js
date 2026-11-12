@@ -1,8 +1,11 @@
-import { DEFAULT_CATEGORIES, DEFAULT_MARKETS, DEFAULT_PRODUCTS, generateSampleSales } from '../utils/sampleData';
 import { supabaseService } from './supabase';
 
 const DB_NAME = 'mercadinho_pos_db_v3';
 const DB_VERSION = 1;
+function requireOnline() {
+  if (!navigator.onLine) throw new Error('O Mercadinho precisa de uma ligação à internet.');
+}
+
 const PENDING_CATALOG_SALE = 'mercadinho_pending_catalog_sale:';
 
 // Storage keys for localStorage fallback or key-value caches
@@ -22,11 +25,7 @@ const DEFAULT_SETTINGS = {
   vibrationEnabled: true,
   taxRate: 0,
   storeName: 'Amigurumi & Artesanato',
-  theme: 'dark',
-  supabaseUrl: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '',
-  supabaseAnonKey: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '',
-  cloudSyncEnabled: true,
-  autoSyncOnStartup: true
+  theme: 'dark'
 };
 
 class PosStorage {
@@ -38,7 +37,6 @@ class PosStorage {
   async init() {
     if (!('indexedDB' in window)) {
       console.warn('IndexedDB not available, falling back to localStorage');
-      this.initLocalStorageDefaults();
       return;
     }
 
@@ -68,95 +66,16 @@ class PosStorage {
         }
       };
 
-      request.onsuccess = async (event) => {
+      request.onsuccess = (event) => {
         this.db = event.target.result;
         resolve(this.db);
-        try {
-          await this.seedDefaultsIfEmpty();
-        } catch (e) {
-          console.error("Seeding error:", e);
-        }
       };
 
       request.onerror = (event) => {
         console.error('IndexedDB error:', event.target.error);
-        this.initLocalStorageDefaults();
         resolve(null);
       };
     });
-  }
-
-  initLocalStorageDefaults() {
-    if (!localStorage.getItem(KEYS.PRODUCTS)) {
-      localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(DEFAULT_PRODUCTS));
-    }
-    if (!localStorage.getItem(KEYS.CATEGORIES)) {
-      localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(DEFAULT_CATEGORIES));
-    }
-    if (!localStorage.getItem(KEYS.MARKETS)) {
-      localStorage.setItem(KEYS.MARKETS, JSON.stringify(DEFAULT_MARKETS));
-    }
-    if (!localStorage.getItem(KEYS.ACTIVE_MARKET)) {
-      localStorage.setItem(KEYS.ACTIVE_MARKET, JSON.stringify(DEFAULT_MARKETS[0]));
-    }
-    if (!localStorage.getItem(KEYS.SALES)) {
-      localStorage.setItem(KEYS.SALES, JSON.stringify(generateSampleSales()));
-    }
-    if (!localStorage.getItem(KEYS.SETTINGS)) {
-      localStorage.setItem(KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
-    }
-  }
-
-  async seedDefaultsIfEmpty() {
-    if (!this.db) return;
-
-    const countStore = (storeName) => new Promise((res) => {
-      const tx = this.db.transaction(storeName, 'readonly');
-      const req = tx.objectStore(storeName).count();
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => res(0);
-    });
-
-    const putItem = (storeName, item) => new Promise((res) => {
-      const tx = this.db.transaction(storeName, 'readwrite');
-      const req = tx.objectStore(storeName).put(item);
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => res(null);
-    });
-
-    const prodCount = await countStore('products');
-    if (prodCount === 0) {
-      for (const p of DEFAULT_PRODUCTS) {
-        await putItem('products', p);
-      }
-    }
-
-    const catCount = await countStore('categories');
-    if (catCount === 0) {
-      for (const c of DEFAULT_CATEGORIES) {
-        await putItem('categories', c);
-      }
-    }
-
-    const mktCount = await countStore('markets');
-    if (mktCount === 0) {
-      for (const m of DEFAULT_MARKETS) {
-        await putItem('markets', m);
-      }
-    }
-
-    const salesCount = await countStore('sales');
-    if (salesCount === 0) {
-      const sampleSales = generateSampleSales();
-      for (const s of sampleSales) {
-        await putItem('sales', s);
-      }
-    }
-
-    const settings = await this.get('settings', 'config');
-    if (!settings) {
-      await putItem('settings', { key: 'config', ...DEFAULT_SETTINGS });
-    }
   }
 
   // Generic IndexedDB helpers with localStorage fallback
@@ -277,7 +196,7 @@ class PosStorage {
   async flushCatalogSales() {
     if (!this.catalogSalesSync) {
       this.catalogSalesSync = (async () => {
-        await this.ensureSupabase();
+        requireOnline();
         for (const sale of this.getPendingCatalogSales()) {
           await supabaseService.recordCatalogSale(sale);
           localStorage.removeItem(PENDING_CATALOG_SALE + sale.id);
@@ -288,74 +207,31 @@ class PosStorage {
   }
 
   async setCatalogStock(product, stock) {
-    await this.ensureSupabase();
+    requireOnline();
     const updated = await supabaseService.setCatalogStock(product, stock);
     await this.put('products', updated);
     return updated;
   }
 
   async linkCatalogInventory(imported, existingId) {
-    await this.ensureSupabase();
+    requireOnline();
     const linked = await supabaseService.linkCatalogInventory(imported, existingId);
     await this.put("products", linked);
     await this.delete("products", imported.id);
     return linked;
   }
 
-  async ensureSupabase() {
-    if (supabaseService.client && supabaseService.isConfigured()) return supabaseService;
-    try {
-      const settings = await this.getSettings();
-      const url = settings.supabaseUrl || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
-      const key = settings.supabaseAnonKey || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
-      if (url && key) {
-        supabaseService.init(url, key);
-      }
-    } catch (e) {
-      console.warn('ensureSupabase error:', e);
-    }
-    return supabaseService;
-  }
-
-  /**
-   * Automatically fetch all data from Supabase on startup if online and configured.
-   * Hydrates local stores (products, categories, markets, sales) with database records.
-   */
   async syncFromCloudOnStartup() {
-    // 1. Check network connectivity
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      return {
-        success: false,
-        source: 'offline',
-        message: 'Device is offline. Loaded cached local data.'
-      };
+    requireOnline();
+    if (!(await supabaseService.checkAccess())) {
+      return { success: false, source: 'forbidden', message: 'Esta conta não tem acesso ao Mercadinho.' };
     }
 
-    // 2. Ensure Supabase is configured
-    await this.ensureSupabase();
-    if (!supabaseService.isConfigured()) {
-      return {
-        success: false,
-        source: 'unconfigured',
-        message: 'Supabase cloud credentials not set.'
-      };
-    }
-
-    // 3. Test connection to cloud database
-    const isConn = await supabaseService.testConnection();
-    if (!isConn) {
-      return {
-        success: false,
-        source: 'error',
-        message: 'Não foi possível aceder ao Supabase. Confirma a ligação nas definições ou inicia sessão no separador Wallapop.'
-      };
-    }
-
-    // Pending sales must reach the server before its inventory replaces the local view.
+    // Retry legacy pending sales from devices running the previous version.
     try {
       await this.flushCatalogSales();
     } catch (error) {
-      return { success: false, source: 'error', message: error.message || 'Há vendas por sincronizar.' };
+      console.warn('Há vendas antigas por sincronizar:', error);
     }
 
     // 4. Fetch all remote records from the database
@@ -364,90 +240,49 @@ class PosStorage {
       return {
         success: false,
         source: 'error',
-        message: 'Failed to retrieve tables from Supabase.'
+        message: 'Não foi possível carregar o inventário e as vendas.'
       };
     }
 
     const { products = [], categories = [], markets = [], sales = [] } = remote;
-    const hasRemoteData = products.length > 0 || categories.length > 0 || markets.length > 0 || sales.length > 0;
-
-    if (hasRemoteData) {
-      // Keep local-only rows when the Sanity import first populates the cloud catalog.
-      if (!products.some(product => product.sanity_product_id)) {
-        await this.clear('products');
-        await this.clear('categories');
-        await this.clear('markets');
-        await this.clear('sales');
-      } else {
-        const remoteIds = new Set(products.map(product => product.id));
-        for (const product of await this.getProducts()) {
-          if (product.sanity_product_id && !remoteIds.has(product.id)) {
-            await this.delete('products', product.id);
-          }
-        }
+    // Keep historical local records and remove obsolete links to the Sanity catalog.
+    const remoteIds = new Set(products.map(product => product.id));
+    for (const product of await this.getProducts()) {
+      if (product.sanity_product_id && !remoteIds.has(product.id)) {
+        await this.delete('products', product.id);
       }
-
-      for (const p of products) await this.put('products', p);
-      for (const c of categories) await this.put('categories', c);
-      for (const m of markets) await this.put('markets', m);
-      for (const s of sales) await this.put('sales', s);
-
-      if (markets.length > 0) {
-        const activeM = markets.find(m => m.active) || markets[0];
-        this.setActiveMarket(activeM);
-      }
-
-      return {
-        success: true,
-        source: 'cloud',
-        message: `Connected to Supabase. Loaded ${products.length} products, ${sales.length} sales.`,
-        counts: {
-          products: products.length,
-          categories: categories.length,
-          markets: markets.length,
-          sales: sales.length
-        }
-      };
-    } else {
-      // Remote database is completely empty; seed initial local records to cloud
-      const localData = {
-        products: await this.getProducts(),
-        categories: await this.getCategories(),
-        markets: await this.getMarkets(),
-        sales: await this.getSales()
-      };
-
-      if (localData.products.length > 0 || localData.categories.length > 0) {
-        await supabaseService.pushAllLocalData(localData);
-      }
-
-      return {
-        success: true,
-        source: 'cloud_initialized',
-        message: 'Connected to empty cloud database. Local catalog synchronized.'
-      };
     }
+
+    for (const p of products) await this.put('products', p);
+    for (const c of categories) {
+      const cached = await this.get('categories', c.id);
+      await this.put('categories', { order: cached?.order, ...c });
+    }
+    for (const m of markets) await this.put('markets', m);
+    for (const s of sales) await this.put('sales', s);
+
+    if (markets.length > 0) {
+      const currentMarket = this.getActiveMarket();
+      this.setActiveMarket(markets.find(m => m.id === currentMarket?.id) || markets.find(m => m.active) || markets[0]);
+    }
+    return { success: true, source: 'cloud', message: this.getPendingCatalogSales().length ? 'Dados atualizados. Há vendas antigas por sincronizar.' : 'Inventário e vendas atualizados.' };
   }
 
   async saveProduct(product) {
     if (!product.id) {
       product.id = `prod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
-    await this.put('products', product);
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.syncProduct(product);
+    await this.put('products', product);
     return product;
   }
 
   async deleteProduct(id) {
     const existing = await this.get('products', id);
     if (existing?.sanity_product_id || id.startsWith('sanity:')) return false;
-    await this.ensureSupabase();
-    if (existing) {
-      await supabaseService.deleteProduct(id, existing.code);
-    } else {
-      await supabaseService.deleteProduct(id);
-    }
+    requireOnline();
+    await supabaseService.deleteProduct(id);
     return await this.delete('products', id);
   }
 
@@ -464,25 +299,25 @@ class PosStorage {
       const existing = await this.getAll('categories');
       category.order = existing.length;
     }
-    await this.put('categories', category);
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.syncCategory(category);
+    await this.put('categories', category);
     return category;
   }
 
   async saveAllCategories(categoriesList) {
+    requireOnline();
     await this.clear('categories');
     const ordered = categoriesList.map((c, idx) => ({ ...c, order: idx }));
     for (const c of ordered) {
       await this.put('categories', c);
     }
-    await this.ensureSupabase();
-    await supabaseService.pushAllLocalData({ categories: ordered });
+
     return ordered;
   }
 
   async deleteCategory(id) {
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.deleteCategory(id);
     return await this.delete('categories', id);
   }
@@ -495,14 +330,14 @@ class PosStorage {
     if (!market.id) {
       market.id = `mkt-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     }
-    await this.put('markets', market);
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.syncMarket(market);
+    await this.put('markets', market);
     return market;
   }
 
   async deleteMarket(id) {
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.deleteMarket(id);
     return await this.delete('markets', id);
   }
@@ -514,7 +349,7 @@ class PosStorage {
         return JSON.parse(raw);
       } catch (e) { }
     }
-    return DEFAULT_MARKETS[0];
+    return null;
   }
 
   setActiveMarket(market) {
@@ -530,12 +365,13 @@ class PosStorage {
     if (localStorage.getItem(PENDING_CATALOG_SALE + id)) {
       throw new Error('Esta venda ainda está por sincronizar.');
     }
-    await this.ensureSupabase();
+    requireOnline();
     await supabaseService.deleteSale(id);
     return await this.delete('sales', id);
   }
 
   async saveSale(saleData) {
+    requireOnline();
     const sale = {
       id: saleData.id || `sale-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: saleData.timestamp || new Date().toISOString(),
@@ -555,181 +391,32 @@ class PosStorage {
     const existingSale = await this.get('sales', sale.id);
     if (existingSale) return existingSale;
 
-    const products = await this.getProducts();
-    const catalogSale = sale.items.some(item =>
-      item.id?.startsWith('sanity:') || products.some(product => product.id === item.id && product.sanity_product_id)
-    );
-    if (catalogSale) localStorage.setItem(PENDING_CATALOG_SALE + sale.id, JSON.stringify(sale));
+    // The same server transaction records the sale and subtracts stock for all inventory items.
+    // Reusing the sale ID makes retries safe if the connection drops before the response arrives.
+    await supabaseService.recordCatalogSale(sale);
     await this.put('sales', sale);
-    await this.ensureSupabase();
-    if (!catalogSale) await supabaseService.syncSale(sale);
 
-    // Update the local stock immediately, including while offline.
-    for (const item of sale.items) {
-      const product = products.find(p => p.id === item.id || (p.code && p.code === item.code));
-      if (product && typeof product.stock === 'number') {
-        product.stock = Math.max(0, product.stock - (item.quantity || 1));
-        await this.put('products', product);
-        if (!catalogSale) await supabaseService.syncProduct(product);
-      }
-    }
-
-    if (catalogSale && navigator.onLine) {
-      try {
-        await this.flushCatalogSales();
-      } catch (error) {
-        console.warn('A venda ficou pendente de sincronização:', error);
-      }
+    try {
+      const ids = [...new Set(sale.items.map(item => item.id))];
+      const products = await supabaseService.fetchProductsById(ids);
+      for (const product of products) await this.put('products', product);
+    } catch (error) {
+      console.warn('Venda registada. Não foi possível atualizar o stock no dispositivo:', error);
     }
     return sale;
   }
 
   async getSettings() {
     const config = await this.get('settings', 'config');
-    return config ? { ...DEFAULT_SETTINGS, ...config } : DEFAULT_SETTINGS;
+    const { supabaseUrl, supabaseAnonKey, autoSyncOnStartup, cloudSyncEnabled, ...preferences } = config || {};
+    return { ...DEFAULT_SETTINGS, ...preferences };
   }
 
   async saveSettings(newSettings) {
-    const updated = { key: 'config', ...newSettings };
+    const { supabaseUrl, supabaseAnonKey, autoSyncOnStartup, cloudSyncEnabled, ...preferences } = newSettings;
+    const updated = { ...await this.getSettings(), ...preferences, key: 'config' };
     await this.put('settings', updated);
-
-    // Initialize or reconfigure Supabase client
-    if (updated.supabaseUrl && updated.supabaseAnonKey) {
-      supabaseService.init(updated.supabaseUrl, updated.supabaseAnonKey);
-    }
     return updated;
-  }
-
-  async syncWithCloud() {
-    if (this.getPendingCatalogSales().length) return this.syncFromCloudOnStartup();
-    const settings = await this.getSettings();
-    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
-      return { success: false, message: 'Supabase URL and Anon Key not configured' };
-    }
-
-    supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
-    const isConn = await supabaseService.testConnection();
-    if (!isConn) {
-      return { success: false, message: 'Could not connect to Supabase. Check credentials and table schema.' };
-    }
-
-    const remote = await supabaseService.fetchRemoteData();
-    if (!remote) {
-      return { success: false, message: 'Failed to fetch data from Supabase' };
-    }
-
-    // Merge remote into local
-    if (remote.products?.length) {
-      for (const p of remote.products) await this.put('products', p);
-    }
-    if (remote.categories?.length) {
-      for (const c of remote.categories) await this.put('categories', c);
-    }
-    if (remote.markets?.length) {
-      for (const m of remote.markets) await this.put('markets', m);
-    }
-    if (remote.sales?.length) {
-      for (const s of remote.sales) await this.put('sales', s);
-    }
-
-    // Push local items that might not be in remote
-    const localData = {
-      products: await this.getProducts(),
-      categories: await this.getCategories(),
-      markets: await this.getMarkets(),
-      sales: await this.getSales()
-    };
-    await supabaseService.pushAllLocalData(localData);
-
-    return {
-      success: true,
-      message: 'Cloud Sync Complete! All data synchronized with Supabase.'
-    };
-  }
-
-  // Wipe local data completely and replace with cloud database records
-  async pullFromCloudAndReplaceLocal() {
-    if (this.getPendingCatalogSales().length) return { success: false, message: 'Sincroniza primeiro as vendas pendentes.' };
-    const settings = await this.getSettings();
-    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
-      return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
-    }
-
-    supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
-    const isConn = await supabaseService.testConnection();
-    if (!isConn) {
-      return { success: false, message: 'Could not connect to Supabase. Please verify your Project URL and Anon Key.' };
-    }
-
-    const remote = await supabaseService.fetchRemoteData();
-    if (!remote) {
-      return { success: false, message: 'Failed to fetch data from Supabase tables.' };
-    }
-
-    // 1. Wipe local database stores
-    await this.clear('products');
-    await this.clear('categories');
-    await this.clear('markets');
-    await this.clear('sales');
-
-    // 2. Insert all remote records
-    const prods = remote.products || [];
-    const cats = remote.categories || [];
-    const mkts = remote.markets || [];
-    const sales = remote.sales || [];
-
-    for (const p of prods) await this.put('products', p);
-    for (const c of cats) await this.put('categories', c);
-    for (const m of mkts) await this.put('markets', m);
-    for (const s of sales) await this.put('sales', s);
-
-    if (mkts.length > 0) {
-      const activeM = mkts.find(m => m.active) || mkts[0];
-      this.setActiveMarket(activeM);
-    }
-
-    return {
-      success: true,
-      message: `Successfully replaced local data! Loaded ${prods.length} products, ${cats.length} categories, ${mkts.length} markets, and ${sales.length} sales from your cloud database.`,
-      counts: {
-        products: prods.length,
-        categories: cats.length,
-        markets: mkts.length,
-        sales: sales.length
-      }
-    };
-  }
-
-  // Push all local data to Supabase (initial seed or force push)
-  async pushAllLocalDataToCloud() {
-    if (this.getPendingCatalogSales().length) return { success: false, message: 'Sincroniza primeiro as vendas pendentes.' };
-    const settings = await this.getSettings();
-    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
-      return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
-    }
-
-    supabaseService.init(settings.supabaseUrl, settings.supabaseAnonKey);
-    const isConn = await supabaseService.testConnection();
-    if (!isConn) {
-      return { success: false, message: 'Could not connect to Supabase. Please verify your Project URL and Anon Key.' };
-    }
-
-    const localData = {
-      products: await this.getProducts(),
-      categories: await this.getCategories(),
-      markets: await this.getMarkets(),
-      sales: await this.getSales()
-    };
-
-    const res = await supabaseService.pushAllLocalData(localData, { overwriteAll: true });
-    if (!res) {
-      return { success: false, message: 'Failed to upload local data to Supabase.' };
-    }
-
-    return {
-      success: true,
-      message: `Successfully uploaded ${localData.products.length} products, ${localData.categories.length} categories, ${localData.markets.length} markets, and ${localData.sales.length} sales to Supabase cloud!`
-    };
   }
 
   async exportFullBackup() {
@@ -787,21 +474,6 @@ class PosStorage {
     return true;
   }
 
-  async resetToDemoData() {
-    await this.clear('products');
-    await this.clear('categories');
-    await this.clear('markets');
-    await this.clear('sales');
-    await this.clear('settings');
-
-    for (const p of DEFAULT_PRODUCTS) await this.put('products', p);
-    for (const c of DEFAULT_CATEGORIES) await this.put('categories', c);
-    for (const m of DEFAULT_MARKETS) await this.put('markets', m);
-    for (const s of generateSampleSales()) await this.put('sales', s);
-    await this.put('settings', { key: 'config', ...DEFAULT_SETTINGS });
-    this.setActiveMarket(DEFAULT_MARKETS[0]);
-    return true;
-  }
 }
 
 export const db = new PosStorage();

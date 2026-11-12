@@ -1,9 +1,8 @@
 # 🛒 Mercadinho POS - Smart Barcode & QR Scanner Point of Sale
 
-A mobile-first, offline-ready **Point of Sale (POS)** and **Sales Analytics** web application designed specifically for market vendors, artisan fairs, pop-up stores, and small retailers. It runs 100% on **GitHub Pages** without any backend server!
+A mobile-first **Point of Sale (POS)** and **Sales Analytics** web application designed specifically for market vendors, artisan fairs, pop-up stores, and small retailers. The app is hosted on **GitHub Pages** and requires an internet connection and an authorized Supabase account.
 
 ![GitHub Pages Ready](https://img.shields.io/badge/GitHub%20Pages-Ready-emerald?style=flat-square&logo=github)
-![PWA Offline Ready](https://img.shields.io/badge/Storage-IndexedDB%20Offline-blue?style=flat-square)
 ![Barcode & QR](https://img.shields.io/badge/Scanner-Barcode%20%26%20QR-purple?style=flat-square)
 
 ---
@@ -42,9 +41,9 @@ A mobile-first, offline-ready **Point of Sale (POS)** and **Sales Analytics** we
 - **Auto-Generate EAN Barcodes**: 1-click realistic 13-digit EAN generator.
 - **Printable Sticker Sheets**: Generates scannable Barcode & QR code sticker sheets formatted for A4 label stickers or thermal sticker rolls ready to print!
 
-### 7. 💾 100% Offline & GitHub Pages Compatible
-- **Local Persistence**: Stores everything in browser **IndexedDB** with LocalStorage fallback. No database servers or monthly subscriptions required.
-- **Full Backup & Restore**: Export all sales, products, and markets to a single `.json` file and restore on any phone or laptop.
+### 7. 💾 Account access and exports
+- **Account access**: Sign in when opening the app. Inventory and sales are synchronized with Supabase.
+- **Local backups**: Export sales, products, and markets from the device to a single `.json` file.
 - **Spreadsheet Export**: 1-click export of sales history and product catalog to `.csv`.
 
 ---
@@ -62,13 +61,15 @@ A mobile-first, offline-ready **Point of Sale (POS)** and **Sales Analytics** we
    npm install
    ```
 
-3. **Start the local development server**:
+3. Copy `.env.example` to `.env.local` and fill in the Supabase URL and publishable key. See [Supabase setup](SANITY-INTEGRATION.md).
+
+4. **Start the local development server**:
    ```bash
    npm run dev
    ```
    Open `http://localhost:5173` in your browser or local network on your mobile phone!
 
-4. **Build production bundle**:
+5. **Build production bundle**:
    ```bash
    npm run build
    ```
@@ -99,7 +100,6 @@ This repository includes a ready-to-use GitHub Actions workflow in [`.github/wor
 ## 📱 Mobile Scanner Tips
 - For best results on mobile, allow camera access when prompted by the browser.
 - Use the **Products & Labels** tab to print test barcode stickers or display barcodes on a secondary screen to test scanning.
-- Pre-loaded with realistic sample products across Bakery, Crafts, Honey & Produce with valid barcodes!
 
 ---
 

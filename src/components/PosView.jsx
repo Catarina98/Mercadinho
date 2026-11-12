@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ShoppingBag, Search, Plus, Minus, Trash2, ArrowRight, AlertCircle, Package, AlertTriangle } from 'lucide-react';
 import Scanner from './Scanner';
 import QuantityKeypadModal from './QuantityKeypadModal';
@@ -10,6 +10,7 @@ export default function PosView({
   categories = [],
   activeMarket,
   currencySymbol = '€',
+  accessBlocked,
   onSaveSale,
   onOpenProductModal,
   onOpenMarketModal
@@ -132,10 +133,24 @@ export default function PosView({
     }
   };
 
+  const checkoutAttempt = useRef(null);
+
   // Complete checkout sale
   const handleSaleCompleted = async (saleRecord) => {
-    await onSaveSale(saleRecord);
-    setLastCompletedSale(saleRecord);
+    const saleKey = JSON.stringify(saleRecord.items);
+    if (checkoutAttempt.current?.key !== saleKey) {
+      checkoutAttempt.current = { key: saleKey, sale: { ...saleRecord, id: 'sale-' + crypto.randomUUID() } };
+    }
+    let saved;
+    try {
+      saved = await onSaveSale(checkoutAttempt.current.sale);
+    } catch (error) {
+      // A rejected transaction can be edited. After a network error, retry the original sale.
+      if (error.code === '22023') checkoutAttempt.current = null;
+      throw error;
+    }
+    checkoutAttempt.current = null;
+    setLastCompletedSale(saved);
     setCart([]);
     setMobileTab('catalog');
   };
@@ -181,7 +196,7 @@ export default function PosView({
           {/* Scanner Component */}
           <Scanner
             onScanSuccess={handleScanCode}
-            isScannerActive={isScannerActive}
+            isScannerActive={!accessBlocked && isScannerActive}
             setIsScannerActive={setIsScannerActive}
           />
 
