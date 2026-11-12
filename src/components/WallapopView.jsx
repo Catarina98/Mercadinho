@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, RefreshCw, Store } from 'lucide-react';
+import { ExternalLink, RefreshCw, Store, Unlink } from 'lucide-react';
 import '../styles/wallapop.css';
 
 function StockForm({ product, onSave, onReport }) {
@@ -70,39 +70,56 @@ function LinkInventory({ imported, products, onLink, onReport }) {
   );
 }
 
-function ListingTasks({ title, products, empty, remove, onSelectProduct }) {
+function storefrontLink(product) {
+  if (!product.sanity_slug) return null;
+  const url = new URL('/product/' + encodeURIComponent(product.sanity_slug) + '/', 'https://fiosdaria.pt');
+  if (product.sanity_variant_id) url.searchParams.set('variant', product.sanity_variant_id);
+  return url.href;
+}
+
+function ListingTasks({ title, products, empty, onRemoveLink, removingId, onSelectProduct }) {
   return (
     <section className="glass-card wallapop-section">
       <h2>{title} ({products.length})</h2>
       {products.length ? (
         <ul className="wallapop-list">
-          {products.map(product => (
-            <li key={product.id} className="wallapop-task">
-              <div>
-                <strong>{product.name}</strong>
-                <p>{product.stock} un. em stock</p>
-              </div>
-              <div className="wallapop-actions">
-                {remove ? (
-                  <a className="btn btn-secondary" href={product.wallapop_url} target="_blank" rel="noopener noreferrer">
-                    Abrir anúncio <ExternalLink size={14} />
-                  </a>
-                ) : (
-                  <>
-                    <a className="btn btn-secondary" href={'https://fiosdaria.pt/product/' + encodeURIComponent(product.sanity_slug) + '/'} target="_blank" rel="noopener noreferrer">
-                      Ver produto <ExternalLink size={14} />
+          {products.map(product => {
+            const productUrl = storefrontLink(product);
+            return (
+              <li key={product.id} className="wallapop-task">
+                <div>
+                  <strong>{product.name}</strong>
+                  <p>{product.stock} un. em stock</p>
+                </div>
+                <div className="wallapop-actions">
+                  {productUrl && (
+                    <a className="btn btn-secondary" href={productUrl} target="_blank" rel="noopener noreferrer">
+                      Ver no site <ExternalLink size={14} />
                     </a>
+                  )}
+                  {onRemoveLink ? (
+                    <a className="btn btn-secondary" href={product.wallapop_url} target="_blank" rel="noopener noreferrer">
+                      Abrir anúncio <ExternalLink size={14} />
+                    </a>
+                  ) : (
                     <a className="btn btn-secondary" href="https://pt.wallapop.com/" target="_blank" rel="noopener noreferrer">
                       Abrir Wallapop <ExternalLink size={14} />
                     </a>
-                  </>
-                )}
-                <button className="btn btn-secondary" onClick={() => onSelectProduct(product.id)}>
-                  Editar stock
-                </button>
-              </div>
-            </li>
-          ))}
+                  )}
+                  <button className="btn btn-secondary" onClick={() => onSelectProduct(product.id)}>
+                    Editar stock
+                  </button>
+                  {onRemoveLink && (
+                    <button className="btn btn-secondary wallapop-unlink" disabled={Boolean(removingId)}
+                      onClick={() => onRemoveLink(product)}>
+                      <Unlink size={14} />
+                      {removingId === product.id ? 'A remover link…' : 'Remover link Wallapop'}
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       ) : <p>{empty}</p>}
     </section>
@@ -110,10 +127,11 @@ function ListingTasks({ title, products, empty, remove, onSelectProduct }) {
 }
 
 export default function WallapopView({
-  products, stockProductId, onSelectProduct, onSaveStock, onLinkInventory, onRefresh, pendingSales
+  products, stockProductId, onSelectProduct, onSaveStock, onLinkInventory, onRemoveLink, onRefresh, pendingSales
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [removingId, setRemovingId] = useState(null);
   const catalog = products.filter(product => product.sanity_product_id && product.sanity_active !== false);
   const remove = catalog.filter(product => product.stock_confirmed && product.stock === 0 && product.wallapop_url);
   const publish = catalog.filter(product => product.stock_confirmed && product.stock > 0 && !product.wallapop_url);
@@ -131,15 +149,32 @@ export default function WallapopView({
     }
   }
 
+  async function removeLink(product) {
+    if (removingId || !window.confirm('Já retiraste o anúncio de «' + product.name +
+      '» na Wallapop? Ao continuar, o link é removido do site.')) return;
+    setRemovingId(product.id);
+    setMessage('');
+    try {
+      const result = await onRemoveLink(product);
+      setMessage(result.wallapopUrl
+        ? 'O link anterior foi removido. Ainda há outro link da Wallapop na ficha.'
+        : result.synced ? 'Link removido do Sanity e do site.' : 'Link removido do Sanity. A lista ainda está a sincronizar.');
+    } catch (error) {
+      setMessage(error.message || 'Não foi possível remover o link.');
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
   return (
     <div className="wallapop-view">
       <div className="wallapop-heading">
         <h1><Store size={24} /> Wallapop</h1>
-        <button className="btn btn-secondary" onClick={refresh} disabled={busy}>
+        <button className="btn btn-secondary" onClick={refresh} disabled={busy || Boolean(removingId)}>
           <RefreshCw size={16} /> Atualizar
         </button>
       </div>
-      <p>Depois de publicares ou retirares um anúncio, atualiza o respetivo link no Sanity.</p>
+      <p>Depois de retirares um anúncio na Wallapop, remove o link nesta lista. Para novos anúncios, cola o link na ficha no Sanity.</p>
       {message && <p role="status">{message}</p>}
       {pendingSales > 0 && <p role="status">Vendas por sincronizar: {pendingSales}. Carrega em Atualizar quando tiveres rede.</p>}
 
@@ -169,7 +204,7 @@ export default function WallapopView({
         ) : <p>Ainda não há artigos importados do Sanity.</p>}
       </section>
 
-      <ListingTasks title="Retirar da Wallapop" products={remove} remove
+      <ListingTasks title="Retirar da Wallapop" products={remove} onRemoveLink={removeLink} removingId={removingId}
         empty="Não há artigos esgotados com anúncio associado." onSelectProduct={onSelectProduct} />
       <ListingTasks title="Publicar na Wallapop" products={publish}
         empty="Não há artigos em stock sem link da Wallapop." onSelectProduct={onSelectProduct} />

@@ -1,2 +1,5 @@
 [functions.sanity-catalog]
 verify_jwt = true
+
+[functions.remove-wallapop-link]
+verify_jwt = true

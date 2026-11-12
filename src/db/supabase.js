@@ -68,6 +68,17 @@ class SupabaseService {
     return data === true;
   }
 
+  async removeWallapopLink(product) {
+    const { data, error } = await this.client.functions.invoke('remove-wallapop-link', {
+      body: { productId: product.id, expectedUrl: product.wallapop_url }
+    });
+    if (error) {
+      const details = await error.context?.json?.().catch(() => null);
+      throw new Error(details?.error || 'Não foi possível confirmar a remoção do link. Tenta novamente.');
+    }
+    return data;
+  }
+
   async setCatalogStock(product, stock) {
     if (!this.client) throw new Error("Liga-te ao Supabase para guardar o stock.");
     const { data, error } = await this.client.rpc("set_catalog_stock", {

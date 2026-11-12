@@ -352,6 +352,13 @@ export default function App() {
                   stockProductId={stockProductId}
                   onSelectProduct={setStockProductId}
                   onRefresh={triggerCloudSync}
+                  onRemoveLink={async product => {
+                    const result = await db.removeWallapopLink(product);
+                    setProducts(previous => previous.map(item => item.id === product.id
+                      ? { ...item, wallapop_url: result.wallapopUrl }
+                      : item));
+                    return result;
+                  }}
                   pendingSales={db.getPendingCatalogSales().length}
                   onLinkInventory={async (imported, existingId) => {
                     const linked = await db.linkCatalogInventory(imported, existingId);
