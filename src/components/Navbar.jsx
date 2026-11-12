@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Cloud, CloudOff, RefreshCw, Store } from 'lucide-react';
 
 export default function Navbar({
   activeTab,
@@ -116,6 +116,14 @@ export default function Navbar({
             </button>
 
             <button
+              className={`nav-tab-btn ${activeTab === 'wallapop' ? 'active' : ''}`}
+              onClick={() => setActiveTab('wallapop')}
+            >
+              <Store size={16} />
+              <span>Wallapop</span>
+            </button>
+
+            <button
               className={`nav-tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
             >
@@ -159,6 +167,14 @@ export default function Navbar({
         >
           <Package size={20} />
           <span>Products</span>
+        </button>
+
+        <button
+          className={`mobile-nav-item ${activeTab === 'wallapop' ? 'active' : ''}`}
+          onClick={() => setActiveTab('wallapop')}
+        >
+          <Store size={20} />
+          <span>Wallapop</span>
         </button>
 
         <button

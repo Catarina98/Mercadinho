@@ -4,6 +4,7 @@ import PosView from './components/PosView';
 import AnalyticsView from './components/AnalyticsView';
 import SalesHistoryView from './components/SalesHistoryView';
 import CatalogView from './components/CatalogView';
+import WallapopView from './components/WallapopView';
 import SettingsView from './components/SettingsView';
 import MarketSelectorModal from './components/MarketSelectorModal';
 import { db } from './db/storage';
@@ -11,6 +12,7 @@ import { db } from './db/storage';
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos' | 'analytics' | 'sales' | 'catalog' | 'settings'
   const [products, setProducts] = useState([]);
+  const [stockProductId, setStockProductId] = useState('');
   const [categories, setCategories] = useState([]);
   const [markets, setMarkets] = useState([]);
   const [activeMarket, setActiveMarket] = useState(null);
@@ -194,7 +196,12 @@ export default function App() {
   };
 
   const handleDeleteSale = async (saleId) => {
-    await db.deleteSale(saleId);
+    try {
+      await db.deleteSale(saleId);
+    } catch (error) {
+      window.alert(error.message);
+      return;
+    }
     const updatedSales = await db.getSales();
     setSales(updatedSales);
   };
@@ -290,7 +297,7 @@ export default function App() {
       <main className="main-content">
         {activeTab === 'pos' && (
           <PosView
-            products={products}
+            products={products.filter(product => product.sanity_active !== false && product.stock_confirmed !== false)}
             categories={categories}
             activeMarket={activeMarket}
             currencySymbol={currencySymbol}
@@ -321,17 +328,40 @@ export default function App() {
 
         {activeTab === 'catalog' && (
           <CatalogView
-            products={products}
+            products={products.filter(product => product.sanity_active !== false)}
             categories={categories}
             currencySymbol={currencySymbol}
             onSaveProduct={handleSaveProduct}
             onDeleteProduct={handleDeleteProduct}
+            onManageCatalogStock={product => {
+              setStockProductId(product.id);
+              setActiveTab('wallapop');
+            }}
             onSaveCategory={handleSaveCategory}
             onReorderCategories={handleReorderCategories}
             onDeleteCategory={handleDeleteCategory}
             onResetDemoData={handleResetDemoData}
             editingProductInitial={editingProductInitial}
             onClearInitialEditingProduct={() => setEditingProductInitial(null)}
+          />
+        )}
+
+        {activeTab === 'wallapop' && (
+          <WallapopView
+            products={products}
+            stockProductId={stockProductId}
+            onSelectProduct={setStockProductId}
+            onRefresh={() => triggerCloudSync()}
+            pendingSales={db.getPendingCatalogSales().length}
+            onLinkInventory={async (imported, existingId) => {
+              const linked = await db.linkCatalogInventory(imported, existingId);
+              setProducts(await db.getProducts());
+              setStockProductId(linked.id);
+            }}
+            onSaveStock={async (product, stock) => {
+              const updated = await db.setCatalogStock(product, stock);
+              setProducts(previous => previous.map(item => item.id === updated.id ? updated : item));
+            }}
           />
         )}
 

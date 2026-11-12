@@ -1,0 +1,60 @@
+.wallapop-view {
+  display: grid;
+  gap: 1rem;
+}
+
+.wallapop-heading,
+.wallapop-heading h1,
+.wallapop-task,
+.wallapop-actions,
+.wallapop-stock-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wallapop-heading,
+.wallapop-task {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.wallapop-section {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.wallapop-section h2 {
+  font-size: 1.15rem;
+}
+
+.wallapop-section label,
+.wallapop-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wallapop-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallapop-task {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wallapop-actions,
+.wallapop-stock-form {
+  flex-wrap: wrap;
+}
+
+.wallapop-stock-form {
+  align-items: end;
+}
+
+.wallapop-login {
+  max-width: 28rem;
+}

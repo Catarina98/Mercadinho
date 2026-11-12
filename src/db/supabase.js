@@ -47,16 +47,12 @@ CREATE TABLE IF NOT EXISTS public.sales (
     notes TEXT DEFAULT ''
 );
 
--- Enable Row Level Security (RLS) and allow public read/write for demo
+-- Enable RLS. Apply the Sanity catalog migration to grant operator access.
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.markets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public all products" ON public.products FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all categories" ON public.categories FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all markets" ON public.markets FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all sales" ON public.sales FOR ALL USING (true) WITH CHECK (true);
 `.trim();
 
 class SupabaseService {
@@ -108,9 +104,53 @@ class SupabaseService {
     }
   }
 
+  async signIn(email, password) {
+    if (!this.client) throw new Error("Configura a ligação ao Supabase nas definições.");
+    const { error } = await this.client.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    const permission = await this.client.rpc("is_mercadinho_operator");
+    if (permission.error || !permission.data) {
+      await this.client.auth.signOut();
+      throw new Error("A conta ainda não tem acesso ao inventário.");
+    }
+  }
+
+  async setCatalogStock(product, stock) {
+    if (!this.client) throw new Error("Liga-te ao Supabase para guardar o stock.");
+    const { data, error } = await this.client.rpc("set_catalog_stock", {
+      product_id: product.id,
+      expected_stock: product.stock,
+      expected_confirmed: product.stock_confirmed,
+      new_stock: stock
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async linkCatalogInventory(imported, existingId) {
+    if (!this.client) throw new Error("Liga-te ao Supabase para associar o artigo.");
+    const { data, error } = await this.client.rpc("link_catalog_inventory", {
+      imported_id: imported.id,
+      existing_id: existingId
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async recordCatalogSale(sale) {
+    if (!this.client) throw new Error("Liga-te ao Supabase para sincronizar a venda.");
+    const { error } = await this.client.rpc("record_catalog_sale", { sale });
+    if (error) throw error;
+  }
+
   async testConnection() {
     if (!this.client) return false;
     try {
+      const permission = await this.client.rpc('is_mercadinho_operator');
+      if ((permission.error && permission.error.code !== 'PGRST202') || permission.data === false) {
+        this.isConnected = false;
+        return false;
+      }
       const { error } = await this.client.from('products').select('id').limit(1);
       if (error) {
         console.warn('Supabase test connection error:', error);
@@ -176,7 +216,7 @@ class SupabaseService {
   }
 
   async syncProduct(product) {
-    if (!this.client) return;
+    if (!this.client || product.sanity_product_id || product.id.startsWith('sanity:')) return;
     try {
       await this.client.from('products').upsert({
         id: product.id,
@@ -291,7 +331,7 @@ class SupabaseService {
         if (remote) {
           const localProdIds = new Set((localData.products || []).map(p => p.id));
           for (const p of (remote.products || [])) {
-            if (!localProdIds.has(p.id)) {
+            if (!p.sanity_product_id && !localProdIds.has(p.id)) {
               await this.client.from('products').delete().eq('id', p.id);
             }
           }
@@ -312,8 +352,10 @@ class SupabaseService {
         }
       }
 
-      if (localData.products?.length) {
-        await this.client.from('products').upsert(localData.products);
+      const privateProducts = (localData.products || []).filter(p => !p.sanity_product_id && !p.id.startsWith('sanity:'));
+      if (privateProducts.length) {
+        const { error } = await this.client.from('products').upsert(privateProducts);
+        if (error) throw error;
       }
       if (localData.categories?.length) {
         await this.client.from('categories').upsert(localData.categories);
@@ -336,7 +378,8 @@ class SupabaseService {
           change: s.change,
           notes: s.notes
         }));
-        await this.client.from('sales').upsert(salesRows);
+        const { error } = await this.client.from('sales').upsert(salesRows);
+        if (error) throw error;
       }
       return true;
     } catch (e) {
