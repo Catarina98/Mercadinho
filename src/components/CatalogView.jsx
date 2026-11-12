@@ -24,6 +24,7 @@ export default function CatalogView({
   currencySymbol = '€',
   onSaveProduct,
   onDeleteProduct,
+  onManageCatalogStock,
   onSaveCategory,
   onReorderCategories,
   onDeleteCategory,
@@ -70,6 +71,10 @@ export default function CatalogView({
   };
 
   const openEditModal = (product) => {
+    if (product.sanity_product_id) {
+      onManageCatalogStock(product);
+      return;
+    }
     setEditingProduct(product);
     setFormName(product.name || '');
     setFormCode(product.code || '');

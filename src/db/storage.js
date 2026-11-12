@@ -3,6 +3,7 @@ import { supabaseService } from './supabase';
 
 const DB_NAME = 'mercadinho_pos_db_v3';
 const DB_VERSION = 1;
+const PENDING_CATALOG_SALE = 'mercadinho_pending_catalog_sale:';
 
 // Storage keys for localStorage fallback or key-value caches
 const KEYS = {
@@ -265,6 +266,42 @@ class PosStorage {
     return products.find(p => p.code && p.code.toString().trim().toLowerCase() === cleanCode) || null;
   }
 
+  getPendingCatalogSales() {
+    return Object.keys(localStorage)
+      .filter(key => key.startsWith(PENDING_CATALOG_SALE))
+      .map(key => JSON.parse(localStorage.getItem(key)))
+      .filter(Boolean)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  async flushCatalogSales() {
+    if (!this.catalogSalesSync) {
+      this.catalogSalesSync = (async () => {
+        await this.ensureSupabase();
+        for (const sale of this.getPendingCatalogSales()) {
+          await supabaseService.recordCatalogSale(sale);
+          localStorage.removeItem(PENDING_CATALOG_SALE + sale.id);
+        }
+      })().finally(() => { this.catalogSalesSync = null; });
+    }
+    return this.catalogSalesSync;
+  }
+
+  async setCatalogStock(product, stock) {
+    await this.ensureSupabase();
+    const updated = await supabaseService.setCatalogStock(product, stock);
+    await this.put('products', updated);
+    return updated;
+  }
+
+  async linkCatalogInventory(imported, existingId) {
+    await this.ensureSupabase();
+    const linked = await supabaseService.linkCatalogInventory(imported, existingId);
+    await this.put("products", linked);
+    await this.delete("products", imported.id);
+    return linked;
+  }
+
   async ensureSupabase() {
     if (supabaseService.client && supabaseService.isConfigured()) return supabaseService;
     try {
@@ -310,8 +347,15 @@ class PosStorage {
       return {
         success: false,
         source: 'error',
-        message: 'Could not connect to Supabase. Check credentials.'
+        message: 'Não foi possível aceder ao Supabase. Confirma a ligação nas definições ou inicia sessão no separador Wallapop.'
       };
+    }
+
+    // Pending sales must reach the server before its inventory replaces the local view.
+    try {
+      await this.flushCatalogSales();
+    } catch (error) {
+      return { success: false, source: 'error', message: error.message || 'Há vendas por sincronizar.' };
     }
 
     // 4. Fetch all remote records from the database
@@ -328,11 +372,20 @@ class PosStorage {
     const hasRemoteData = products.length > 0 || categories.length > 0 || markets.length > 0 || sales.length > 0;
 
     if (hasRemoteData) {
-      // Overwrite local stores with remote database data
-      await this.clear('products');
-      await this.clear('categories');
-      await this.clear('markets');
-      await this.clear('sales');
+      // Keep local-only rows when the Sanity import first populates the cloud catalog.
+      if (!products.some(product => product.sanity_product_id)) {
+        await this.clear('products');
+        await this.clear('categories');
+        await this.clear('markets');
+        await this.clear('sales');
+      } else {
+        const remoteIds = new Set(products.map(product => product.id));
+        for (const product of await this.getProducts()) {
+          if (product.sanity_product_id && !remoteIds.has(product.id)) {
+            await this.delete('products', product.id);
+          }
+        }
+      }
 
       for (const p of products) await this.put('products', p);
       for (const c of categories) await this.put('categories', c);
@@ -387,8 +440,9 @@ class PosStorage {
   }
 
   async deleteProduct(id) {
-    await this.ensureSupabase();
     const existing = await this.get('products', id);
+    if (existing?.sanity_product_id || id.startsWith('sanity:')) return false;
+    await this.ensureSupabase();
     if (existing) {
       await supabaseService.deleteProduct(id, existing.code);
     } else {
@@ -473,6 +527,9 @@ class PosStorage {
   }
 
   async deleteSale(id) {
+    if (localStorage.getItem(PENDING_CATALOG_SALE + id)) {
+      throw new Error('Esta venda ainda está por sincronizar.');
+    }
     await this.ensureSupabase();
     await supabaseService.deleteSale(id);
     return await this.delete('sales', id);
@@ -495,21 +552,35 @@ class PosStorage {
       notes: saleData.notes || ''
     };
 
+    const existingSale = await this.get('sales', sale.id);
+    if (existingSale) return existingSale;
+
+    const products = await this.getProducts();
+    const catalogSale = sale.items.some(item =>
+      item.id?.startsWith('sanity:') || products.some(product => product.id === item.id && product.sanity_product_id)
+    );
+    if (catalogSale) localStorage.setItem(PENDING_CATALOG_SALE + sale.id, JSON.stringify(sale));
     await this.put('sales', sale);
     await this.ensureSupabase();
-    await supabaseService.syncSale(sale);
+    if (!catalogSale) await supabaseService.syncSale(sale);
 
-    // Optional stock decrement
-    const products = await this.getProducts();
+    // Update the local stock immediately, including while offline.
     for (const item of sale.items) {
       const product = products.find(p => p.id === item.id || (p.code && p.code === item.code));
       if (product && typeof product.stock === 'number') {
         product.stock = Math.max(0, product.stock - (item.quantity || 1));
         await this.put('products', product);
-        await supabaseService.syncProduct(product);
+        if (!catalogSale) await supabaseService.syncProduct(product);
       }
     }
 
+    if (catalogSale && navigator.onLine) {
+      try {
+        await this.flushCatalogSales();
+      } catch (error) {
+        console.warn('A venda ficou pendente de sincronização:', error);
+      }
+    }
     return sale;
   }
 
@@ -530,6 +601,7 @@ class PosStorage {
   }
 
   async syncWithCloud() {
+    if (this.getPendingCatalogSales().length) return this.syncFromCloudOnStartup();
     const settings = await this.getSettings();
     if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
       return { success: false, message: 'Supabase URL and Anon Key not configured' };
@@ -577,6 +649,7 @@ class PosStorage {
 
   // Wipe local data completely and replace with cloud database records
   async pullFromCloudAndReplaceLocal() {
+    if (this.getPendingCatalogSales().length) return { success: false, message: 'Sincroniza primeiro as vendas pendentes.' };
     const settings = await this.getSettings();
     if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
       return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
@@ -629,6 +702,7 @@ class PosStorage {
 
   // Push all local data to Supabase (initial seed or force push)
   async pushAllLocalDataToCloud() {
+    if (this.getPendingCatalogSales().length) return { success: false, message: 'Sincroniza primeiro as vendas pendentes.' };
     const settings = await this.getSettings();
     if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
       return { success: false, message: 'Supabase URL and Anon Key are not configured in settings.' };
