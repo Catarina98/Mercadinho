@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Cloud, CloudOff, RefreshCw, Store } from 'lucide-react';
+import { ShoppingBag, TrendingUp, History, Package, Settings, MapPin, Cloud, RefreshCw, Store } from 'lucide-react';
 
 export default function Navbar({
   activeTab,
@@ -22,7 +22,7 @@ export default function Navbar({
             title="Fiordaria POS - Go to POS"
             aria-label="Fiordaria POS"
           >
-            <img src="/logo.png" alt="Fiordaria Logo" className="logo-img" />
+            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Fiordaria Logo" className="logo-img" />
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
@@ -41,30 +41,15 @@ export default function Navbar({
 
             {/* Cloud Database Sync Pill */}
             <button
-              className={`cloud-pill-btn status-${cloudSyncStatus || 'offline'}`}
-              onClick={() => {
-                if (cloudSyncStatus === 'unconfigured') {
-                  setActiveTab('settings');
-                } else if (onTriggerCloudSync) {
-                  onTriggerCloudSync();
-                }
-              }}
-              title={cloudSyncMessage || (cloudSyncStatus === 'synced' ? 'Database Connected & Synced (Click to refresh)' : 'Click to sync with database')}
+              className={`cloud-pill-btn status-${cloudSyncStatus}`}
+              onClick={onTriggerCloudSync}
+              disabled={cloudSyncStatus === 'syncing'}
+              title={cloudSyncMessage || 'Atualizar inventário e vendas'}
             >
-              <span className={`cloud-pill-dot status-${cloudSyncStatus || 'offline'}`} />
-              {cloudSyncStatus === 'syncing' ? (
-                <RefreshCw size={13} className="spin-animation" />
-              ) : cloudSyncStatus === 'offline' ? (
-                <CloudOff size={13} />
-              ) : (
-                <Cloud size={13} />
-              )}
+              <span className={`cloud-pill-dot status-${cloudSyncStatus}`} />
+              {cloudSyncStatus === 'syncing' ? <RefreshCw size={13} className="spin-animation" /> : <Cloud size={13} />}
               <span className="cloud-pill-text">
-                {cloudSyncStatus === 'syncing' && 'Syncing'}
-                {cloudSyncStatus === 'synced' && 'Cloud DB'}
-                {cloudSyncStatus === 'offline' && 'Offline'}
-                {cloudSyncStatus === 'unconfigured' && 'Setup DB'}
-                {cloudSyncStatus === 'error' && 'Sync Retry'}
+                {cloudSyncStatus === 'syncing' ? 'A atualizar…' : 'Sincronizado'}
               </span>
             </button>
           </div>

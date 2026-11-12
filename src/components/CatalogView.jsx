@@ -28,7 +28,6 @@ export default function CatalogView({
   onSaveCategory,
   onReorderCategories,
   onDeleteCategory,
-  onResetDemoData,
   editingProductInitial = null,
   onClearInitialEditingProduct
 }) {

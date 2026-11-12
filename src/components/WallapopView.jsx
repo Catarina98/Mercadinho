@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ExternalLink, RefreshCw, Store } from 'lucide-react';
-import { db } from '../db/storage';
 import '../styles/wallapop.css';
 
 function StockForm({ product, onSave, onReport }) {
@@ -113,9 +112,6 @@ function ListingTasks({ title, products, empty, remove, onSelectProduct }) {
 export default function WallapopView({
   products, stockProductId, onSelectProduct, onSaveStock, onLinkInventory, onRefresh, pendingSales
 }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [signedIn, setSignedIn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const catalog = products.filter(product => product.sanity_product_id && product.sanity_active !== false);
@@ -125,38 +121,11 @@ export default function WallapopView({
   const needsCount = catalog.filter(product => !product.stock_confirmed).length;
   const unlinked = products.filter(product => !product.sanity_product_id);
 
-  useEffect(() => {
-    let active = true;
-    db.ensureSupabase().then(async service => {
-      if (!service.client) return;
-      const { data } = await service.client.auth.getSession();
-      if (active) setSignedIn(Boolean(data.session));
-    }).catch(() => {});
-    return () => { active = false; };
-  }, []);
-
   async function refresh() {
     setBusy(true);
     try {
       const result = await onRefresh();
       setMessage(result.success ? 'Dados atualizados.' : result.message || 'Não foi possível atualizar os dados.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function signIn(event) {
-    event.preventDefault();
-    setBusy(true);
-    try {
-      const service = await db.ensureSupabase();
-      await service.signIn(email.trim(), password);
-      setPassword('');
-      setSignedIn(true);
-      const result = await onRefresh();
-      setMessage(result.success ? 'Dados atualizados.' : result.message || 'Não foi possível atualizar os dados.');
-    } catch (error) {
-      setMessage(error.message || 'Não foi possível iniciar sessão.');
     } finally {
       setBusy(false);
     }
@@ -173,17 +142,6 @@ export default function WallapopView({
       <p>Depois de publicares ou retirares um anúncio, atualiza o respetivo link no Sanity.</p>
       {message && <p role="status">{message}</p>}
       {pendingSales > 0 && <p role="status">Vendas por sincronizar: {pendingSales}. Carrega em Atualizar quando tiveres rede.</p>}
-
-      {!signedIn && (
-        <form className="glass-card wallapop-section wallapop-login" onSubmit={signIn}>
-          <h2>Acesso ao inventário</h2>
-          <label>Email<input className="input-styled" type="email" autoComplete="username" required
-            value={email} onChange={event => setEmail(event.target.value)} /></label>
-          <label>Palavra-passe<input className="input-styled" type="password" autoComplete="current-password" required
-            value={password} onChange={event => setPassword(event.target.value)} /></label>
-          <button className="btn btn-primary" disabled={busy}>Iniciar sessão</button>
-        </form>
-      )}
 
       <section className="glass-card wallapop-section">
         <h2>Stock dos produtos do site</h2>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import PosView from './components/PosView';
 import AnalyticsView from './components/AnalyticsView';
@@ -8,6 +8,8 @@ import WallapopView from './components/WallapopView';
 import SettingsView from './components/SettingsView';
 import MarketSelectorModal from './components/MarketSelectorModal';
 import { db } from './db/storage';
+import { supabaseService } from './db/supabase';
+import AccessScreen from './components/AccessScreen';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos' | 'analytics' | 'sales' | 'catalog' | 'settings'
@@ -20,13 +22,15 @@ export default function App() {
   const [settings, setSettings] = useState(null);
   const [isMarketModalOpen, setIsMarketModalOpen] = useState(false);
   const [editingProductInitial, setEditingProductInitial] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // Cloud sync status state: 'syncing' | 'synced' | 'offline' | 'unconfigured' | 'error'
-  const [cloudSyncStatus, setCloudSyncStatus] = useState('syncing');
-  const [cloudSyncMessage, setCloudSyncMessage] = useState('');
+  const [userId, setUserId] = useState(undefined);
+  const [validatedUser, setValidatedUser] = useState(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [access, setAccess] = useState('checking');
+  const [retry, setRetry] = useState(0);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState('synced');
+  const client = supabaseService.client;
 
-  const refreshAllData = async () => {
+  const refreshAllData = useCallback(async () => {
     const [loadedProds, loadedCats, loadedMkts, loadedSales, loadedSettings] = await Promise.all([
       db.getProducts(),
       db.getCategories(),
@@ -40,94 +44,116 @@ export default function App() {
     setSales(loadedSales);
     setSettings(loadedSettings);
     setActiveMarket(db.getActiveMarket() || loadedMkts[0] || null);
-    return { loadedProds, loadedCats, loadedMkts, loadedSales, loadedSettings };
-  };
+  }, []);
 
-  const triggerCloudSync = async (notify = false) => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setCloudSyncStatus('offline');
-      setCloudSyncMessage('Offline - local storage mode');
-      return { success: false, reason: 'offline' };
-    }
-
-    setCloudSyncStatus('syncing');
-    setCloudSyncMessage('Syncing with database...');
-
-    try {
-      const syncResult = await db.syncFromCloudOnStartup();
-
-      if (syncResult.success) {
-        setCloudSyncStatus('synced');
-        setCloudSyncMessage(syncResult.message || 'Synced with cloud database');
-        await refreshAllData();
-      } else if (syncResult.source === 'offline') {
-        setCloudSyncStatus('offline');
-        setCloudSyncMessage('Offline - working with local data');
-      } else if (syncResult.source === 'unconfigured') {
-        setCloudSyncStatus('unconfigured');
-        setCloudSyncMessage('Cloud sync not configured');
-      } else {
-        setCloudSyncStatus('error');
-        setCloudSyncMessage(syncResult.message || 'Error connecting to database');
-      }
-
-      return syncResult;
-    } catch (err) {
-      console.warn('Auto cloud sync failed:', err);
-      setCloudSyncStatus('error');
-      setCloudSyncMessage('Cloud sync error');
-      return { success: false, error: err };
-    }
-  };
-
-  // Initial load: fast local paint, then automatic cloud database hydration if online
   useEffect(() => {
-    let isMounted = true;
+    if (!client) return;
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      const nextUser = session?.user.id ?? null;
+      setUserId(nextUser);
+      if (!nextUser) setValidatedUser(null);
+    });
+    return () => subscription.unsubscribe();
+  }, [client]);
 
-    async function initialStartup() {
-      try {
-        // 1. Instant local load from IndexedDB
-        await refreshAllData();
-
-        if (isMounted) {
-          setIsLoading(false);
-        }
-
-        // 2. Hydrate from cloud database if online
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          await triggerCloudSync();
-        } else {
-          setCloudSyncStatus('offline');
-          setCloudSyncMessage('Offline - local storage mode');
-        }
-      } catch (err) {
-        console.error('Error during initial startup:', err);
-        if (isMounted) setIsLoading(false);
-      }
-    }
-
-    initialStartup();
-
-    // 3. Network status event listeners for live re-sync on reconnect
-    const handleOnline = () => {
-      console.log('Internet connected. Syncing with database...');
-      triggerCloudSync(true);
+  useEffect(() => {
+    const reconnect = () => {
+      setAccess('checking');
+      setOnline(true);
+      setRetry(attempt => attempt + 1);
     };
-
-    const handleOffline = () => {
-      setCloudSyncStatus('offline');
-      setCloudSyncMessage('Offline - working with local data');
+    const disconnect = () => {
+      setAccess('checking');
+      setOnline(false);
     };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
+    window.addEventListener('online', reconnect);
+    window.addEventListener('offline', disconnect);
     return () => {
-      isMounted = false;
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', reconnect);
+      window.removeEventListener('offline', disconnect);
     };
   }, []);
+
+  useEffect(() => {
+    if (!online || !userId) return;
+    let cancelled = false;
+    setAccess('checking');
+    async function loadInventory() {
+      try {
+        const result = await db.syncFromCloudOnStartup();
+        if (cancelled || !navigator.onLine) return;
+        if (!result.success) {
+          setAccess(result.source === 'forbidden' ? 'forbidden' : 'error');
+          return;
+        }
+        await refreshAllData();
+        if (cancelled || !navigator.onLine) return;
+        setValidatedUser(userId);
+        setAccess('ready');
+      } catch {
+        if (!cancelled && navigator.onLine) setAccess('error');
+      }
+    }
+    loadInventory();
+    return () => { cancelled = true; };
+  }, [online, refreshAllData, retry, userId]);
+
+  const canUseApp = online && access === 'ready' && Boolean(userId) && validatedUser === userId;
+
+  // A device can report that it is online even when it cannot reach the service.
+  useEffect(() => {
+    if (!canUseApp) return;
+    let cancelled = false;
+    let checking = false;
+    async function checkConnection() {
+      if (checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        if (!(await supabaseService.checkAccess()) && !cancelled) setAccess('forbidden');
+      } catch {
+        if (!cancelled) setAccess('error');
+      } finally {
+        checking = false;
+      }
+    }
+    const interval = window.setInterval(checkConnection, 30000);
+    document.addEventListener('visibilitychange', checkConnection);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', checkConnection);
+    };
+  }, [canUseApp]);
+
+  const triggerCloudSync = async () => {
+    setCloudSyncStatus('syncing');
+    try {
+      const result = await db.syncFromCloudOnStartup();
+      if (result.success) await refreshAllData();
+      else setAccess(result.source === 'forbidden' ? 'forbidden' : 'error');
+      return result;
+    } catch {
+      setAccess('error');
+      return { success: false, message: 'Não foi possível atualizar o inventário.' };
+    } finally {
+      setCloudSyncStatus('synced');
+    }
+  };
+
+  const signOut = async () => {
+    await supabaseService.signOut();
+    setActiveTab('pos');
+    setIsMarketModalOpen(false);
+  };
+
+  // These views use the same handler from both the catalog and the market selector.
+  const withSaveFeedback = action => async (...args) => {
+    try {
+      await action(...args);
+    } catch {
+      window.alert('Não foi possível guardar a alteração. Verifica a ligação e tenta novamente.');
+    }
+  };
 
   // Handlers for Market Locations
   const handleSelectMarket = (mkt) => {
@@ -187,6 +213,7 @@ export default function App() {
 
   // Handlers for Sales
   const handleSaveSale = async (saleData) => {
+    if (!canUseApp || !navigator.onLine) throw new Error('Sem acesso ao Mercadinho.');
     const saved = await db.saveSale(saleData);
     const updatedSales = await db.getSales();
     const updatedProds = await db.getProducts();
@@ -234,169 +261,141 @@ export default function App() {
     setActiveMarket(db.getActiveMarket());
   };
 
-  const handleResetDemoData = async () => {
-    await db.resetToDemoData();
-    const [p, c, m, s, cfg] = await Promise.all([
-      db.getProducts(),
-      db.getCategories(),
-      db.getMarkets(),
-      db.getSales(),
-      db.getSettings()
-    ]);
-    setProducts(p);
-    setCategories(c);
-    setMarkets(m);
-    setSales(s);
-    setSettings(cfg);
-    setActiveMarket(m[0]);
-  };
-
   const currencySymbol = settings?.currencySymbol || '€';
 
-  if (isLoading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '1rem',
-        background: 'var(--bg-main)',
-        color: 'var(--text-primary)'
-      }}>
-        <div style={{
-          width: '40px',
-          height: '40px',
-          border: '3px solid rgba(16, 185, 129, 0.2)',
-          borderTopColor: 'var(--primary)',
-          borderRadius: '50%',
-          animation: 'spin 0.8s linear infinite'
-        }} />
-        <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.1rem' }}>
-          Loading Mercadinho POS...
-        </div>
-      </div>
-    );
-  }
+  let screen = null;
+  if (!online) screen = 'offline';
+  else if (!client) screen = 'unconfigured';
+  else if (userId === undefined) screen = 'checking';
+  else if (!userId) screen = 'login';
+  else if (!canUseApp) screen = access === 'ready' ? 'checking' : access;
 
   return (
-    <div className="app-container">
-      {/* Top App Navbar */}
-      <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        activeMarket={activeMarket}
-        onOpenMarketModal={() => setIsMarketModalOpen(true)}
-        cloudSyncStatus={cloudSyncStatus}
-        cloudSyncMessage={cloudSyncMessage}
-        onTriggerCloudSync={() => triggerCloudSync(true)}
-      />
-
-      {/* Main Content Area */}
-      <main className="main-content">
-        {activeTab === 'pos' && (
-          <PosView
-            products={products.filter(product => product.sanity_active !== false && product.stock_confirmed !== false)}
-            categories={categories}
-            activeMarket={activeMarket}
-            currencySymbol={currencySymbol}
-            onSaveSale={handleSaveSale}
-            onOpenProductModal={(initial) => {
-              setEditingProductInitial(initial || {});
-              setActiveTab('catalog');
-            }}
-            onOpenMarketModal={() => setIsMarketModalOpen(true)}
-          />
-        )}
-
-        {activeTab === 'analytics' && (
-          <AnalyticsView
-            sales={sales}
-            currencySymbol={currencySymbol}
-          />
-        )}
-
-        {activeTab === 'sales' && (
-          <SalesHistoryView
-            sales={sales}
-            markets={markets}
-            currencySymbol={currencySymbol}
-            onDeleteSale={handleDeleteSale}
-          />
-        )}
-
-        {activeTab === 'catalog' && (
-          <CatalogView
-            products={products.filter(product => product.sanity_active !== false)}
-            categories={categories}
-            currencySymbol={currencySymbol}
-            onSaveProduct={handleSaveProduct}
-            onDeleteProduct={handleDeleteProduct}
-            onManageCatalogStock={product => {
-              setStockProductId(product.id);
-              setActiveTab('wallapop');
-            }}
-            onSaveCategory={handleSaveCategory}
-            onReorderCategories={handleReorderCategories}
-            onDeleteCategory={handleDeleteCategory}
-            onResetDemoData={handleResetDemoData}
-            editingProductInitial={editingProductInitial}
-            onClearInitialEditingProduct={() => setEditingProductInitial(null)}
-          />
-        )}
-
-        {activeTab === 'wallapop' && (
-          <WallapopView
-            products={products}
-            stockProductId={stockProductId}
-            onSelectProduct={setStockProductId}
-            onRefresh={() => triggerCloudSync()}
-            pendingSales={db.getPendingCatalogSales().length}
-            onLinkInventory={async (imported, existingId) => {
-              const linked = await db.linkCatalogInventory(imported, existingId);
-              setProducts(await db.getProducts());
-              setStockProductId(linked.id);
-            }}
-            onSaveStock={async (product, stock) => {
-              const updated = await db.setCatalogStock(product, stock);
-              setProducts(previous => previous.map(item => item.id === updated.id ? updated : item));
-            }}
-          />
-        )}
-
-        {activeTab === 'settings' && (
-          <SettingsView
-            settings={settings}
-            markets={markets}
-            activeMarket={activeMarket}
-            cloudSyncStatus={cloudSyncStatus}
-            cloudSyncMessage={cloudSyncMessage}
-            onSaveSettings={handleSaveSettings}
-            onSaveMarket={handleAddMarket}
-            onDeleteMarket={handleDeleteMarket}
-            onSetActiveMarket={handleSelectMarket}
-            onExportBackup={handleExportBackup}
-            onImportBackup={handleImportBackup}
-            onResetDemoData={handleResetDemoData}
-            onRefreshAllData={refreshAllData}
-            onTriggerCloudSync={() => triggerCloudSync(true)}
-          />
-        )}
-      </main>
-
-      {/* Market Selector Modal */}
-      {isMarketModalOpen && (
-        <MarketSelectorModal
-          isOpen={isMarketModalOpen}
-          onClose={() => setIsMarketModalOpen(false)}
-          markets={markets}
-          activeMarket={activeMarket}
-          onSelectMarket={handleSelectMarket}
-          onAddMarket={handleAddMarket}
-          onDeleteMarket={handleDeleteMarket}
+    <>
+      {screen && (
+        <AccessScreen
+          screen={screen}
+          onSignIn={(email, password) => supabaseService.signIn(email, password)}
+          onRetry={() => { setAccess('checking'); setRetry(attempt => attempt + 1); }}
+          onSignOut={signOut}
         />
       )}
-    </div>
+      {userId && validatedUser === userId && (
+        <div key={userId} hidden={!canUseApp}>
+          <div className="app-container">
+            {/* Top App Navbar */}
+            <Navbar
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              activeMarket={activeMarket}
+              onOpenMarketModal={() => setIsMarketModalOpen(true)}
+              cloudSyncStatus={cloudSyncStatus}
+              onTriggerCloudSync={triggerCloudSync}
+            />
+
+            {/* Main Content Area */}
+            <main className="main-content">
+              {activeTab === 'pos' && (
+                <PosView
+                  products={products.filter(product => product.sanity_active !== false && product.stock_confirmed !== false)}
+                  categories={categories}
+                  activeMarket={activeMarket}
+                  currencySymbol={currencySymbol}
+                  accessBlocked={!canUseApp}
+                  onSaveSale={handleSaveSale}
+                  onOpenProductModal={(initial) => {
+                    setEditingProductInitial(initial || {});
+                    setActiveTab('catalog');
+                  }}
+                  onOpenMarketModal={() => setIsMarketModalOpen(true)}
+                />
+              )}
+
+              {activeTab === 'analytics' && (
+                <AnalyticsView
+                  sales={sales}
+                  currencySymbol={currencySymbol}
+                />
+              )}
+
+              {activeTab === 'sales' && (
+                <SalesHistoryView
+                  sales={sales}
+                  markets={markets}
+                  currencySymbol={currencySymbol}
+                  onDeleteSale={handleDeleteSale}
+                />
+              )}
+
+              {activeTab === 'catalog' && (
+                <CatalogView
+                  products={products.filter(product => product.sanity_active !== false)}
+                  categories={categories}
+                  currencySymbol={currencySymbol}
+                  onSaveProduct={withSaveFeedback(handleSaveProduct)}
+                  onDeleteProduct={withSaveFeedback(handleDeleteProduct)}
+                  onManageCatalogStock={product => {
+                    setStockProductId(product.id);
+                    setActiveTab('wallapop');
+                  }}
+                  onSaveCategory={withSaveFeedback(handleSaveCategory)}
+                  onReorderCategories={withSaveFeedback(handleReorderCategories)}
+                  onDeleteCategory={withSaveFeedback(handleDeleteCategory)}
+                  editingProductInitial={editingProductInitial}
+                  onClearInitialEditingProduct={() => setEditingProductInitial(null)}
+                />
+              )}
+
+              {activeTab === 'wallapop' && (
+                <WallapopView
+                  products={products}
+                  stockProductId={stockProductId}
+                  onSelectProduct={setStockProductId}
+                  onRefresh={triggerCloudSync}
+                  pendingSales={db.getPendingCatalogSales().length}
+                  onLinkInventory={async (imported, existingId) => {
+                    const linked = await db.linkCatalogInventory(imported, existingId);
+                    setProducts(await db.getProducts());
+                    setStockProductId(linked.id);
+                  }}
+                  onSaveStock={async (product, stock) => {
+                    const updated = await db.setCatalogStock(product, stock);
+                    setProducts(previous => previous.map(item => item.id === updated.id ? updated : item));
+                  }}
+                />
+              )}
+
+              {activeTab === 'settings' && (
+                <SettingsView
+                  settings={settings}
+                  markets={markets}
+                  activeMarket={activeMarket}
+                  onSaveSettings={handleSaveSettings}
+                  onSaveMarket={withSaveFeedback(handleAddMarket)}
+                  onDeleteMarket={withSaveFeedback(handleDeleteMarket)}
+                  onSetActiveMarket={handleSelectMarket}
+                  onExportBackup={handleExportBackup}
+                  onImportBackup={handleImportBackup}
+                  onSignOut={signOut}
+                />
+              )}
+            </main>
+
+            {/* Market Selector Modal */}
+            {isMarketModalOpen && (
+              <MarketSelectorModal
+                isOpen={isMarketModalOpen}
+                onClose={() => setIsMarketModalOpen(false)}
+                markets={markets}
+                activeMarket={activeMarket}
+                onSelectMarket={handleSelectMarket}
+                onAddMarket={withSaveFeedback(handleAddMarket)}
+                onDeleteMarket={withSaveFeedback(handleDeleteMarket)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

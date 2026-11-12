@@ -18,6 +18,7 @@ export default function CheckoutModal({
   const [amountReceived, setAmountReceived] = useState('');
   const [notes, setNotes] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [saleError, setSaleError] = useState('');
 
   const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalUnits = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -56,14 +57,7 @@ export default function CheckoutModal({
 
     setIsProcessing(true);
 
-    // Trigger celebratory confetti
-    try {
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-    } catch (e) {}
+    setSaleError('');
 
     const saleRecord = {
       timestamp: new Date().toISOString(),
@@ -86,15 +80,22 @@ export default function CheckoutModal({
       notes: notes.trim()
     };
 
-    setTimeout(() => {
-      onCompleteSale(saleRecord);
-      setIsProcessing(false);
+    try {
+      await onCompleteSale(saleRecord);
       onClose();
-    }, 400);
+    } catch (error) {
+      setSaleError(error.code === '22023' ? error.message : 'Não foi possível confirmar a venda. Verifica a ligação e tenta novamente.');
+      return;
+    } finally {
+      setIsProcessing(false);
+    }
+    try {
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    } catch { /* The sale is already saved. */ }
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={isProcessing ? undefined : onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
@@ -103,7 +104,7 @@ export default function CheckoutModal({
             </div>
             <h3 className="modal-title">Proceed with Shopping / Checkout</h3>
           </div>
-          <button className="btn btn-secondary btn-icon" onClick={onClose}>
+          <button className="btn btn-secondary btn-icon" onClick={onClose} disabled={isProcessing}>
             <X size={18} />
           </button>
         </div>
@@ -276,6 +277,8 @@ export default function CheckoutModal({
             onChange={(e) => setNotes(e.target.value)}
           />
         </div>
+
+        {saleError && <p className="checkout-error" role="alert">{saleError}</p>}
 
         {/* Complete Checkout Button */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '0.75rem' }}>

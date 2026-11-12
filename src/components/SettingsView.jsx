@@ -1,148 +1,43 @@
 import React, { useState, useRef } from 'react';
-import { Settings, MapPin, Plus, Trash2, Smartphone, DollarSign, Database, Download, Upload, RefreshCcw, Check, Store, Cloud, CloudOff, RefreshCw, Copy, CheckCheck, ExternalLink, ShieldCheck, Layers } from 'lucide-react';
+import { Settings, MapPin, Plus, Trash2, Database, Download, Upload, Check, Store, LogOut } from 'lucide-react';
 import { downloadJSON } from '../utils/exportUtils';
-import { SUPABASE_SQL_SCHEMA, supabaseService } from '../db/supabase';
-import { db } from '../db/storage';
-
 export default function SettingsView({
   settings,
   markets,
   activeMarket,
-  cloudSyncStatus,
-  cloudSyncMessage,
   onSaveSettings,
   onSaveMarket,
   onDeleteMarket,
   onSetActiveMarket,
   onExportBackup,
   onImportBackup,
-  onResetDemoData,
-  onRefreshAllData,
-  onTriggerCloudSync
+  onSignOut
 }) {
-  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
-  const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
-
   const [storeName, setStoreName] = useState(settings?.storeName || 'Fiordaria');
   const [currencySymbol, setCurrencySymbol] = useState(settings?.currencySymbol || '€');
-  const [autoSyncOnStartup, setAutoSyncOnStartup] = useState(settings?.autoSyncOnStartup !== false);
-  const [supabaseUrl, setSupabaseUrl] = useState(settings?.supabaseUrl || envUrl || '');
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState(settings?.supabaseAnonKey || envKey || '');
-
   const [newMarketName, setNewMarketName] = useState('');
   const [newMarketCity, setNewMarketCity] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [syncStatus, setSyncStatus] = useState(null); // { type: 'success' | 'error' | 'loading', message: string }
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
   const fileInputRef = useRef(null);
 
-  const handleSaveGeneral = (e) => {
+  const handleSaveGeneral = async (e) => {
     e.preventDefault();
-    onSaveSettings({
-      ...settings,
+    await onSaveSettings({
       storeName,
-      currencySymbol,
-      autoSyncOnStartup,
-      supabaseUrl: supabaseUrl.trim(),
-      supabaseAnonKey: supabaseAnonKey.trim()
+      currencySymbol
     });
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
   };
 
-  const handleSyncCloud = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) return;
-
-    setSyncStatus({ type: 'loading', message: 'Connecting and synchronizing data with Supabase...' });
-
-    // Save settings first
-    await onSaveSettings({
-      ...settings,
-      autoSyncOnStartup,
-      supabaseUrl: supabaseUrl.trim(),
-      supabaseAnonKey: supabaseAnonKey.trim()
-    });
-
-    if (onTriggerCloudSync) {
-      const res = await onTriggerCloudSync();
-      if (res?.success) {
-        setSyncStatus({ type: 'success', message: res.message || 'Synchronized with cloud database!' });
-        if (onRefreshAllData) onRefreshAllData();
-      } else {
-        setSyncStatus({ type: 'error', message: res?.message || 'Failed to sync with Supabase.' });
-      }
-    } else {
-      const res = await db.syncWithCloud();
-      if (res.success) {
-        setSyncStatus({ type: 'success', message: res.message });
-        if (onRefreshAllData) onRefreshAllData();
-      } else {
-        setSyncStatus({ type: 'error', message: res.message });
-      }
+  const handleSignOut = async () => {
+    setSignOutError('');
+    try {
+      await onSignOut();
+    } catch {
+      setSignOutError('Não foi possível terminar a sessão. Tenta novamente.');
     }
-  };
-
-  const handlePullFromCloud = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      alert('Please enter your Supabase Project URL and Anon Key first.');
-      return;
-    }
-
-    if (!confirm('⚠️ WARNING: This will DELETE all local products, categories, markets, and sales from this browser and replace them with the data stored in your remote Supabase database. Are you sure you want to proceed?')) {
-      return;
-    }
-
-    setSyncStatus({ type: 'loading', message: 'Wiping local storage and downloading remote database...' });
-
-    await onSaveSettings({
-      ...settings,
-      supabaseUrl: supabaseUrl.trim(),
-      supabaseAnonKey: supabaseAnonKey.trim()
-    });
-
-    const res = await db.pullFromCloudAndReplaceLocal();
-    if (res.success) {
-      setSyncStatus({ type: 'success', message: res.message });
-      if (onRefreshAllData) onRefreshAllData();
-      alert('✅ ' + res.message);
-    } else {
-      setSyncStatus({ type: 'error', message: res.message });
-      alert('❌ ' + res.message);
-    }
-  };
-
-  const handlePushToCloud = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      alert('Please enter your Supabase Project URL and Anon Key first.');
-      return;
-    }
-
-    if (!confirm('This will upload all your local products, categories, markets, and sales to your remote Supabase cloud database. Proceed?')) {
-      return;
-    }
-
-    setSyncStatus({ type: 'loading', message: 'Uploading local data to Supabase cloud...' });
-
-    await onSaveSettings({
-      ...settings,
-      supabaseUrl: supabaseUrl.trim(),
-      supabaseAnonKey: supabaseAnonKey.trim()
-    });
-
-    const res = await db.pushAllLocalDataToCloud();
-    if (res.success) {
-      setSyncStatus({ type: 'success', message: res.message });
-      alert('✅ ' + res.message);
-    } else {
-      setSyncStatus({ type: 'error', message: res.message });
-      alert('❌ ' + res.message);
-    }
-  };
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   const handleAddMarket = (e) => {
@@ -165,7 +60,7 @@ export default function SettingsView({
     try {
       const text = await file.text();
       const backupData = JSON.parse(text);
-      if (confirm('Importing this backup will restore all products, sales history, and markets. Continue?')) {
+      if (confirm('This backup restores products, sales, and markets on this device only. Continue?')) {
         await onImportBackup(backupData);
         alert('Database restored successfully!');
       }
@@ -185,12 +80,19 @@ export default function SettingsView({
             <span>Store & Application Settings</span>
           </h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-            Manage market locations, cloud synchronization (Supabase), currency, and local backups
+            Manage market locations, currency, and local backups
           </p>
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <section className="pos-card settings-session" aria-labelledby="settings-session-title">
+          <h3 id="settings-session-title">Conta do Mercadinho</h3>
+          <button type="button" className="btn btn-secondary" onClick={handleSignOut}>
+            <LogOut size={16} /> Terminar sessão
+          </button>
+          {signOutError && <p role="alert">{signOutError}</p>}
+        </section>
         {/* Section 1: General Preferences */}
         <div className="pos-card">
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -237,156 +139,6 @@ export default function SettingsView({
               </button>
             </div>
           </form>
-        </div>
-
-        {/* Section 2: Real-time Cloud Sync with Supabase (Free) */}
-        <div className="pos-card" style={{ border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Cloud size={20} color="var(--primary)" />
-              <span>Real-Time Cloud Sync (Supabase Free Tier)</span>
-            </h3>
-
-            <a
-              href="https://supabase.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-secondary"
-              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-            >
-              <span>Create Free Supabase Account</span>
-              <ExternalLink size={12} />
-            </a>
-          </div>
-
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            Connect a free Supabase database to automatically synchronize products, barcodes, and sales history between all your devices. When you open Mercadinho POS with an internet connection, <strong>all catalog items and sales are automatically loaded from your cloud database</strong>.
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.25rem' }}>
-            <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.3rem' }}>
-                Supabase Project URL
-              </label>
-              <input
-                type="text"
-                className="input-styled input-mono"
-                placeholder="https://xyzabcdefg.supabase.co"
-                value={supabaseUrl}
-                onChange={(e) => setSupabaseUrl(e.target.value)}
-              />
-              {envUrl && supabaseUrl === envUrl && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.3rem' }}>
-                  <ShieldCheck size={13} /> Loaded from .env environment variable (VITE_SUPABASE_URL)
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.3rem' }}>
-                Supabase Anon Public Key (API Key)
-              </label>
-              <input
-                type="password"
-                className="input-styled input-mono"
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                value={supabaseAnonKey}
-                onChange={(e) => setSupabaseAnonKey(e.target.value)}
-              />
-              {envKey && supabaseAnonKey === envKey && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.3rem' }}>
-                  <ShieldCheck size={13} /> Loaded from .env environment variable (VITE_SUPABASE_ANON_KEY)
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sync Status Banner */}
-          {syncStatus && (
-            <div style={{
-              background: syncStatus.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : syncStatus.type === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(99, 102, 241, 0.15)',
-              border: `1px solid ${syncStatus.type === 'success' ? 'var(--primary)' : syncStatus.type === 'error' ? 'var(--danger)' : '#6366f1'}`,
-              borderRadius: 'var(--radius-md)',
-              padding: '0.75rem 1rem',
-              marginBottom: '1rem',
-              fontSize: '0.85rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              {syncStatus.type === 'loading' && <RefreshCw size={16} className="spin-animation" />}
-              {syncStatus.type === 'success' && <ShieldCheck size={16} color="var(--primary)" />}
-              {syncStatus.type === 'error' && <CloudOff size={16} color="var(--danger)" />}
-              <span>{syncStatus.message}</span>
-            </div>
-          )}
-
-          {/* Cloud Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.6rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleCopySql}
-                title="Copy the SQL code to paste into Supabase SQL Editor"
-              >
-                {copiedSql ? <CheckCheck size={16} color="var(--primary)" /> : <Copy size={16} />}
-                <span>{copiedSql ? 'SQL Snippet Copied!' : 'Copy Supabase SQL Setup Code'}</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleSyncCloud}
-                disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
-              >
-                <RefreshCw size={16} className={syncStatus?.type === 'loading' ? 'spin-animation' : ''} />
-                <span>Test & 2-Way Sync</span>
-              </button>
-            </div>
-
-            {/* Cloud Override Actions: Pull and Push */}
-            <div style={{
-              background: '#f8fafc',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '0.85rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.6rem'
-            }}>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Layers size={15} color="var(--primary)" />
-                <span>Cloud Database Overwrite & Sync Options</span>
-              </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  style={{ flex: 1, minWidth: '220px', fontSize: '0.8rem', padding: '0.5rem 0.85rem' }}
-                  onClick={handlePullFromCloud}
-                  disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
-                  title="Wipe local browser data and load everything stored in your Supabase database"
-                >
-                  <Download size={14} />
-                  <span>Delete Local Data & Load from Database</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ flex: 1, minWidth: '200px', fontSize: '0.8rem', padding: '0.5rem 0.85rem' }}
-                  onClick={handlePushToCloud}
-                  disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || syncStatus?.type === 'loading'}
-                  title="Upload all local products, categories, markets, and sales from this browser to Supabase"
-                >
-                  <Upload size={14} />
-                  <span>Upload Local Data to Cloud</span>
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Section 3: Market Locations Management */}
@@ -492,7 +244,7 @@ export default function SettingsView({
           </h3>
 
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            All your products, barcode codes, market locations, and sales history are saved offline inside your browser's IndexedDB. Download a JSON backup to migrate between devices or preserve records.
+            Download a JSON backup of the products, barcodes, markets, and sales on this device.
           </p>
 
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
