@@ -206,6 +206,14 @@ class PosStorage {
     return this.catalogSalesSync;
   }
 
+  async removeWallapopLink(product) {
+    requireOnline();
+    const result = await supabaseService.removeWallapopLink(product);
+    const cached = await this.get('products', product.id);
+    if (cached) await this.put('products', { ...cached, wallapop_url: result.wallapopUrl });
+    return result;
+  }
+
   async setCatalogStock(product, stock) {
     requireOnline();
     const updated = await supabaseService.setCatalogStock(product, stock);

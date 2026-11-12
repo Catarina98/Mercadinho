@@ -54,3 +54,7 @@
 .wallapop-stock-form {
   align-items: end;
 }
+
+.wallapop-unlink {
+  color: var(--danger);
+}
